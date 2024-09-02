@@ -14,6 +14,10 @@ set_target_properties(
 target_sources(
   ${TARGET} PRIVATE
     src/main.cpp
+    src/Allocators.cpp
+    src/ThreadAffinity.cpp
+    src/ThreadPool.cpp
+    src/Vector.cpp
 )
 
 

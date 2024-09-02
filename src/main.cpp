@@ -2,12 +2,12 @@
 #include "Containers.hpp"
 #include "Vector.hpp"
 #include "ThreadPool.hpp"
+#include "ThreadAffinity.hpp"
 #include "PerformanceCounter.hpp"
 
 #include <cassert>
 #include <chrono>
 
-#include <bitset>
 #include <random>
 #include <iostream>
 #include <functional>

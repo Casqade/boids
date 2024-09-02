@@ -157,8 +157,6 @@ enum PerfMarker : size_t
   Count,
 };
 
-const static size_t PerfMarkerCount {10};
-
 TimePerfCounter timeCounter [PerfMarker::Count] {};
 CyclePerfCounter cycleCounter [PerfMarker::Count] {};
 }
@@ -189,7 +187,7 @@ void repeatedly_called_func()
     PERF_TIME_END(PerfMarker::Marker1);
 
 //    analyze the results
-    for ( size_t i {}; i < PerfMarkerCount; ++i )
+    for ( size_t i {}; i < PerfMarker::Count; ++i )
     {
         if ( cycleCounter[i].update(10) == true )
             std::cout << "marker " << i << " took " << cycleCounter[i].average << " cycles\n";
