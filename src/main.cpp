@@ -295,9 +295,12 @@ main(
           const auto cellId = hashPos(
             boidPosition, cellPerAxisCount );
 
-          boids.cellId[i] = cellId;
+          const auto firstBoidInCellIndex =
+            std::min(i, cells[cellId]);
 
-          cells[cellId] = std::min(i, cells[cellId]);
+          cells[cellId] = firstBoidInCellIndex;
+
+          boids.cellId[i] = firstBoidInCellIndex;
         }
       };
 
@@ -309,13 +312,13 @@ main(
       PERF_TIME_BEGIN(PerfMarker::Summing);
 
       const auto averagePositionSumTask =
-      [&boids, &cells]
+      [&boids]
       {
         PERF_TIME_BEGIN(PerfMarker::PositionSumTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
 
           const auto& boidPosition = boids.position[i];
 
@@ -326,13 +329,13 @@ main(
       };
 
       const auto averageVelocitySumTask =
-      [&boids, &cells]
+      [&boids]
       {
         PERF_TIME_BEGIN(PerfMarker::VelocitySumTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
 
           const auto& boidVelocity = boids.velocity[i];
 
@@ -343,13 +346,13 @@ main(
       };
 
       const auto boidCountSumTask =
-      [&boids, &cells] ()
+      [&boids] ()
       {
         PERF_TIME_BEGIN(PerfMarker::BoidCountSumTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
 
           boids.boidCount[cellId] += 1;
         }
@@ -388,13 +391,13 @@ main(
       };
 
       const auto calcAlignmentTask =
-      [&boids, &cells, &weights = rules.weights] ()
+      [&boids, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
 
           const auto neighborCount = boids.boidCount[cellId];
 
@@ -424,13 +427,13 @@ main(
       };
 
       const auto calcCoherenceTask =
-      [&boids, &cells, &weights = rules.weights] ()
+      [&boids, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
           const auto neighborCount = boids.boidCount[cellId];
 
 //          assert(neighborCount > 0);
@@ -459,13 +462,13 @@ main(
       };
 
       const auto calcSeparationTask =
-      [&boids, &cells, &weights = rules.weights] ()
+      [&boids, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::SeparationTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
-          const auto cellId = cells[boids.cellId[i]];
+          const auto cellId = boids.cellId[i];
           const auto neighborCount = boids.boidCount[cellId];
 
 //          assert(neighborCount > 0);
