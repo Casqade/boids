@@ -29,9 +29,6 @@ struct BoidRuleset
 
 struct BoidData
 {
-  using FloatType = Vector3::value_type;
-
-
   Array <std::size_t> cellId {};
   Array <std::size_t> boidCount {};
 
@@ -109,7 +106,6 @@ printElapsedTime(
   const Clock::time_point& to,
   const std::string& name )
 {
-
   const auto elapsedUs =
     std::chrono::duration_cast <std::chrono::microseconds> (
       to - from).count();
@@ -122,7 +118,6 @@ printElapsedTime(
   const PerfMarker markerId,
   const std::string& name )
 {
-
   const auto elapsedUs =
     timeCounter[markerId].average.count();
 

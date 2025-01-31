@@ -5,6 +5,10 @@
 #include <memory>
 
 
+#define IsPowerOfTwo(integer) \
+  !( integer != 1 && integer & (integer - 1) )
+
+
 class AllocatorArena
 {
 protected:

@@ -4,10 +4,6 @@
 #include <cstdlib>
 
 
-#define IsPowerOfTwo(integer) \
-  !( integer != 1 && integer & (integer - 1) )
-
-
 AllocatorArena::~AllocatorArena()
 {
   assert(mStart == nullptr);
