@@ -30,15 +30,21 @@ struct BoidRuleset
 struct BoidData
 {
   Array <std::size_t> cellId {};
-  Array <std::size_t> boidCount {};
 
-  Array <Vector3> averagePosition {};
-  Array <Vector3> averageVelocity {};
+  Array <Vector3> position {};
+  Array <Vector3> velocity {};
 
   Array <Vector3> obstacleAvoidance {};
   Array <Vector3> alignment {};
   Array <Vector3> coherence {};
   Array <Vector3> separation {};
+};
+
+struct CellData
+{
+  Array <std::size_t> boidCount {};
+  Array <Vector3> averagePosition {};
+  Array <Vector3> averageVelocity {};
 };
 
 
@@ -137,10 +143,10 @@ main(
   const std::size_t cellCount =
     std::pow(cellPerAxisCount, std::size_t{3});
 
+  const std::size_t maxOccupiedCellCount =
+    std::min(boidCount, cellCount);
+
   const auto boidMemory =
-    sizeof(Vector3) +
-    sizeof(Vector3) +
-    sizeof(std::size_t) +
     sizeof(std::size_t) +
     sizeof(Vector3) +
     sizeof(Vector3) +
@@ -150,15 +156,16 @@ main(
     sizeof(Vector3);
 
   const auto cellMemory =
-    sizeof(std::size_t);
-//    sizeof(std::atomic_size_t);
-
+    sizeof(std::size_t) +
+    sizeof(Vector3) +
+    sizeof(Vector3);
 
   AllocatorArena allocator {};
   allocator.reserve(
     sizeof(ThreadPool::ThreadEntry) * threadCount +
     boidMemory * boidCount +
-    cellMemory * cellCount +
+    cellMemory * maxOccupiedCellCount +
+    sizeof(std::size_t) * cellCount +
     sizeof(std::size_t) * 12 );
 
 
@@ -182,10 +189,15 @@ main(
       {allocator, boidCount},
       {allocator, boidCount},
       {allocator, boidCount},
-      {allocator, boidCount},
-      {allocator, boidCount},
-      {allocator, boidCount},
     };
+
+    CellData occupiedCells
+    {
+      {allocator, maxOccupiedCellCount},
+      {allocator, maxOccupiedCellCount},
+      {allocator, maxOccupiedCellCount},
+    };
+
 
     Array <std::size_t> cells {allocator, cellCount};
 
@@ -221,33 +233,33 @@ main(
       PERF_TIME_BEGIN_COPY(PerfMarker::ResetTask, PerfMarker::Total);
 
       const auto resetCellsTask =
-      [&cells, boidCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+      [&cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
       {
         std::fill_n(
           cells.data() + rangeStart,
           rangeEnd - rangeStart,
-          boidCount );
+          tombstone );
       };
 
       const auto resetAveragePositionTask =
-      [&boids] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
       {
         for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          boids.averagePosition[i] = {};
+          occupiedCells.averagePosition[i] = {};
       };
 
       const auto resetAverageVelocityTask =
-      [&boids] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
       {
         for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          boids.averageVelocity[i] = {};
+          occupiedCells.averageVelocity[i] = {};
       };
 
       const auto resetBoidCountTask =
-      [&boids] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
       {
         for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          boids.boidCount[i] = {};
+          occupiedCells.boidCount[i] = {};
       };
 
 
@@ -281,21 +293,25 @@ main(
 
 
       const auto hashPosTask =
-      [&boids, &cells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+      [&boids, &cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
       {
+        size_t occupiedCellCount {};
+
         for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
         {
           const auto& boidPosition = boids.position[i];
 
-          const auto cellId = hashPos(
+//          index into sparse array
+          const auto cellSparseIdx = hashPos(
             boidPosition, cellPerAxisCount );
 
-          const auto firstBoidInCellIndex =
-            std::min(i, cells[cellId]);
+//          index into dense array
+          auto& cellDenseIdx = cells[cellSparseIdx];
 
-          cells[cellId] = firstBoidInCellIndex;
+          if ( cellDenseIdx == tombstone )
+            cellDenseIdx = occupiedCellCount++;
 
-          boids.cellId[i] = firstBoidInCellIndex;
+          boids.cellId[i] = cellDenseIdx;
         }
       };
 
@@ -307,7 +323,7 @@ main(
       PERF_TIME_BEGIN(PerfMarker::Summing);
 
       const auto averagePositionSumTask =
-      [&boids]
+      [&boids, &occupiedCells]
       {
         PERF_TIME_BEGIN(PerfMarker::PositionSumTask);
 
@@ -317,14 +333,14 @@ main(
 
           const auto& boidPosition = boids.position[i];
 
-          boids.averagePosition[cellId] += boidPosition;
+          occupiedCells.averagePosition[cellId] += boidPosition;
         }
 
         PERF_TIME_END(PerfMarker::PositionSumTask);
       };
 
       const auto averageVelocitySumTask =
-      [&boids]
+      [&boids, &occupiedCells]
       {
         PERF_TIME_BEGIN(PerfMarker::VelocitySumTask);
 
@@ -334,14 +350,14 @@ main(
 
           const auto& boidVelocity = boids.velocity[i];
 
-          boids.averageVelocity[cellId] += boidVelocity;
+          occupiedCells.averageVelocity[cellId] += boidVelocity;
         }
 
         PERF_TIME_END(PerfMarker::VelocitySumTask);
       };
 
       const auto boidCountSumTask =
-      [&boids] ()
+      [&boids, &occupiedCells] ()
       {
         PERF_TIME_BEGIN(PerfMarker::BoidCountSumTask);
 
@@ -349,7 +365,7 @@ main(
         {
           const auto cellId = boids.cellId[i];
 
-          boids.boidCount[cellId] += 1;
+          occupiedCells.boidCount[cellId] += 1;
         }
 
         PERF_TIME_END(PerfMarker::BoidCountSumTask);
@@ -386,7 +402,7 @@ main(
       };
 
       const auto calcAlignmentTask =
-      [&boids, &weights = rules.weights] ()
+      [&boids, &occupiedCells, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
 
@@ -394,14 +410,15 @@ main(
         {
           const auto cellId = boids.cellId[i];
 
-          const auto neighborCount = boids.boidCount[cellId];
+          const auto neighborCount =
+            occupiedCells.boidCount[cellId];
 
 //          assert(neighborCount > 0);
 
           const auto& velocity = boids.velocity[i];
 
           const auto& averageVelocity =
-            boids.averageVelocity[cellId];
+            occupiedCells.averageVelocity[cellId];
 
           const auto alignment =
             averageVelocity / neighborCount - velocity;
@@ -422,21 +439,22 @@ main(
       };
 
       const auto calcCoherenceTask =
-      [&boids, &weights = rules.weights] ()
+      [&boids, &occupiedCells, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
           const auto cellId = boids.cellId[i];
-          const auto neighborCount = boids.boidCount[cellId];
+          const auto neighborCount =
+            occupiedCells.boidCount[cellId];
 
 //          assert(neighborCount > 0);
 
           const auto& position = boids.position[i];
 
           const auto& averagePosition =
-            boids.averagePosition[cellId];
+            occupiedCells.averagePosition[cellId];
 
           const auto coherence =
             averagePosition / neighborCount - position;
@@ -457,21 +475,22 @@ main(
       };
 
       const auto calcSeparationTask =
-      [&boids, &weights = rules.weights] ()
+      [&boids, &occupiedCells, &weights = rules.weights] ()
       {
         PERF_TIME_BEGIN(PerfMarker::SeparationTask);
 
         for ( std::size_t i {}; i < boidCount; ++i )
         {
           const auto cellId = boids.cellId[i];
-          const auto neighborCount = boids.boidCount[cellId];
+          const auto neighborCount =
+            occupiedCells.boidCount[cellId];
 
 //          assert(neighborCount > 0);
 
           const auto& position = boids.position[i];
 
           const auto& averagePosition =
-            boids.averagePosition[cellId];
+            occupiedCells.averagePosition[cellId];
 
           const auto separation =
             position - averagePosition / neighborCount;
