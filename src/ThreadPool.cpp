@@ -94,8 +94,8 @@ ThreadPool::push(
 
   pendingTask = std::move(task);
 
-  newTaskReceived.notify_one();
   lock.unlock();
+  newTaskReceived.notify_one();
 }
 
 void
