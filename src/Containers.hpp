@@ -2,11 +2,11 @@
 
 #include "Allocators.hpp"
 
+#include <atomic>
 #include <memory>
 #include <cassert>
 #include <cstddef>
 #include <utility>
-#include <algorithm>
 
 
 template <typename T, std::size_t Alignment = std::size_t{}>
@@ -139,4 +139,74 @@ std::size_t Array <T, Alignment>::alignment() const noexcept
   return Alignment;
 }
 
+
+template <typename Data>
+class RingBuffer
+{
+  Array <Data> mData {};
+
+  std::atomic_size_t mIndexWriter {};
+  std::atomic_size_t mIndexReader {};
+
+
+public:
+  RingBuffer() = default;
+  RingBuffer( RingBuffer&& ) = delete;
+  RingBuffer( const RingBuffer& ) = delete;
+
+
+  void init( AllocatorArena&, size_t bufferSize );
+
+  void push( Data&& );
+  Data&& pop();
+
+  size_t readableElementCount() const;
+};
+
+template <typename Data>
+void
+RingBuffer <Data>::init(
+  AllocatorArena& allocator,
+  size_t bufferSize )
+{
+  assert(mData.length() == 0);
+
+  mData = {allocator, bufferSize};
+}
+
+template <typename Data>
+void
+RingBuffer <Data>::push(
+  Data&& data )
+{
+  const auto index = mIndexWriter.fetch_add(
+    1, std::memory_order_relaxed ) % mData.length();
+
+  mData[index] = data;
+}
+
+template <typename Data>
+Data&&
+RingBuffer <Data>::pop()
+{
+  const auto index = mIndexReader.fetch_add(
+    1, std::memory_order_relaxed );
+
+  assert(index < mIndexWriter.load(std::memory_order_acquire));
+
+  return std::move(mData[index % mData.length()]);
+}
+
+template <typename Data>
+size_t
+RingBuffer <Data>::readableElementCount() const
+{
+  const auto indexReader = mIndexReader.load(
+    std::memory_order_acquire );
+
+  const auto indexWriter = mIndexWriter.load(
+    std::memory_order_acquire );
+
+  return indexWriter - indexReader;
+}
 

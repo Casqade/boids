@@ -138,6 +138,7 @@ main(
   char* argv[] )
 {
   const std::size_t threadCount {3};
+  const std::size_t taskBufferSize = threadCount * 2;
   const std::size_t boidCount {400'000};
   const std::size_t cellPerAxisCount {100};
   const std::size_t cellCount =
@@ -162,11 +163,12 @@ main(
 
   AllocatorArena allocator {};
   allocator.reserve(
+    sizeof(ThreadPool::TaskPrototype) * taskBufferSize +
     sizeof(ThreadPool::ThreadEntry) * threadCount +
     boidMemory * boidCount +
     cellMemory * maxOccupiedCellCount +
     sizeof(std::size_t) * cellCount +
-    sizeof(std::size_t) * 12 );
+    sizeof(std::size_t) * 13 );
 
 
   {
@@ -177,7 +179,7 @@ main(
 
     ThreadPool threadPool {};
     threadPool.init(
-      allocator, threadCount, 2 );
+      allocator, taskBufferSize, threadCount, 2 );
 
 
     BoidData boids

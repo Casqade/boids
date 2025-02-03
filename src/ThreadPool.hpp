@@ -3,6 +3,7 @@
 #include "Containers.hpp"
 
 #include <mutex>
+#include <atomic>
 #include <thread>
 #include <functional>
 #include <condition_variable>
@@ -12,16 +13,9 @@ struct ThreadPool
 {
   struct ThreadEntry
   {
-    volatile bool isBusy {};
     std::thread thread {};
+    std::atomic_bool isBusy {};
   };
-
-  Array <ThreadEntry> threads {};
-
-  bool isRunning {};
-
-  mutable std::mutex mut {};
-  std::condition_variable newTaskReceived {};
 
   using TaskPrototype =
     std::function <void( const std::size_t threadId )>;
@@ -29,12 +23,22 @@ struct ThreadPool
   using ParallelForTaskPrototype =
     std::function <void( const std::size_t rangeStart, const std::size_t rangeEnd )>;
 
-  TaskPrototype pendingTask {};
+
+private:
+  Array <ThreadEntry> mThreads {};
+  RingBuffer <TaskPrototype> mTasks {};
+
+  std::mutex mTasksAvailableMutex {};
+  std::condition_variable mTasksAvailable {};
+
+  std::atomic_bool mShutdownRequested {};
 
 
+public:
   void init(
     AllocatorArena&,
-    const std::size_t threadCount = {},
+    const std::size_t taskBufferSize,
+    const std::size_t threadCount,
     const std::size_t threadAffinityOffset = size_t{2} );
 
   void deinit();

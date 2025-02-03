@@ -7,95 +7,87 @@
 void
 ThreadPool::init(
   AllocatorArena& allocator,
+  const std::size_t taskBufferSize,
   const std::size_t threadCount,
   const std::size_t affinityOffset )
 {
-  threads = {allocator, threadCount};
+  mThreads = {allocator, threadCount};
 
-  isRunning = true;
+  mTasks.init(allocator, taskBufferSize);
 
-  for ( std::size_t i {}; i < threadCount; ++i )
-    threads[i].thread = std::thread(
-    [this, threadIndex = i, affinity = affinityOffset + i * 2] ()
-    {
-      auto mask = initAffinityMask();
+  const auto workerTask =
+  [this] ( const std::size_t threadId, const std::size_t affinity )
+  {
+    auto mask = initAffinityMask();
 
-      addCpuToAffinityMask(
-        mask, affinity );
+    addCpuToAffinityMask(
+      mask, affinity );
 
 //      addCpuToAffinityMask(
 //        mask, threadAffinity + 1 );
 
-      setThreadAffinity(mask);
+    setThreadAffinity(mask);
 
-      while ( isRunning == true )
-      {
-        std::unique_lock lock {mut};
 
-        newTaskReceived.wait( lock,
-        [this]
+    while ( true )
+    {
+      std::unique_lock lock {mTasksAvailableMutex};
+      mTasksAvailable.wait( lock,
+        [this] ()
         {
-          return isRunning == false || pendingTask != nullptr;
-        });
+          return
+            mTasks.readableElementCount() ||
+            mShutdownRequested.load(std::memory_order_relaxed) == true;
+        } );
 
-        if ( pendingTask == nullptr )
-        {
-          if ( isRunning == true )
-            continue;
+      if ( mShutdownRequested.load(std::memory_order_relaxed) == true )
+        return;
 
-          return;
-        }
+      mThreads[threadId].isBusy.store(
+        true, std::memory_order_release );
 
-        const auto task {std::move(pendingTask)};
-        pendingTask = {};
+      auto&& task = mTasks.pop();
 
-        threads[threadIndex].isBusy = true;
-        newTaskReceived.notify_all();
-        lock.unlock();
+      lock.unlock();
 
-        task(threadIndex);
-        threads[threadIndex].isBusy = false;
+      task(threadId);
 
-        newTaskReceived.notify_all();
-      }
-    });
+      mThreads[threadId].isBusy.store(
+        false, std::memory_order_relaxed );
+    }
+  };
+
+  for ( size_t threadId {}; threadId < threadCount; ++threadId )
+    mThreads[threadId].thread = std::thread(
+      workerTask, threadId, affinityOffset + threadId * 2 );
 }
 
 void
 ThreadPool::deinit()
 {
   {
-    std::lock_guard lock {mut};
-    isRunning = false;
+    std::lock_guard lock {mTasksAvailableMutex};
+
+    mShutdownRequested.store(
+      true, std::memory_order_release );
   }
 
-  newTaskReceived.notify_all();
+  mTasksAvailable.notify_all();
 
-  for ( std::size_t i {}; i < threads.length(); ++i )
-  {
-    if ( threads[i].thread.joinable() == true )
-      threads[i].thread.join();
+  waitForTasks();
 
-    threads[i].isBusy = false;
-  }
+  for ( size_t threadId {}; threadId < mThreads.length(); ++threadId )
+    mThreads[threadId].thread.join();
 }
 
 void
 ThreadPool::push(
   TaskPrototype&& task )
 {
-  std::unique_lock lock {mut};
+  mTasks.push(std::move(task));
 
-  newTaskReceived.wait( lock,
-  [this]
-  {
-    return pendingTask == nullptr;
-  });
-
-  pendingTask = std::move(task);
-
-  lock.unlock();
-  newTaskReceived.notify_one();
+  std::lock_guard lock {mTasksAvailableMutex};
+  mTasksAvailable.notify_one();
 }
 
 void
@@ -116,9 +108,7 @@ ThreadPool::parallel_for(
   std::size_t threadCount )
 {
   if ( threadCount == 0 )
-    threadCount = threads.length();
-
-  assert(threadCount > 0);
+    threadCount = mThreads.length();
 
   const auto itersPerThread = iters / (threadCount + 1);
 
@@ -132,7 +122,7 @@ ThreadPool::parallel_for(
 
     if ( rangeEnd != iters )
       push(
-      [task, rangeStart, rangeEnd] ( const std::size_t )
+      [task, rangeStart, rangeEnd] ( const std::size_t threadId )
       {
         task(rangeStart, rangeEnd);
       });
@@ -144,19 +134,14 @@ ThreadPool::parallel_for(
 void
 ThreadPool::waitForTasks()
 {
-  std::unique_lock lock (mut);
+  while ( mTasks.readableElementCount() > 0 )
+    ;
 
-  newTaskReceived.wait( lock,
-  [this]
+  for ( size_t threadId {}; threadId < mThreads.length(); ++threadId )
   {
-    return pendingTask == nullptr;
-  });
+    auto& threadIsBusy = mThreads[threadId].isBusy;
 
-  lock.unlock();
-
-  for ( std::size_t i {}; i < threads.length(); ++i )
-  {
-    while ( threads[i].isBusy == true )
+    while ( threadIsBusy.load(std::memory_order_relaxed) == true )
       ;
   }
 }
