@@ -208,7 +208,10 @@ main(
 
     std::random_device rd {};
     std::uniform_real_distribution dist(0.f, 1.f);
-    std::minstd_rand0 engine {rd()};
+    std::minstd_rand0 engine
+    {
+//      rd()
+    };
 
     const auto posInitTask =
     [&boids, &dist, &engine] ( const std::size_t rangeStart, const std::size_t rangeEnd )
@@ -527,10 +530,11 @@ main(
     std::cout << "start\n";
 
     const std::size_t frameCount {600};
+    const float targetFrameTime {1.f / 120.f};
 
     for ( std::size_t frame {}; frame < frameCount; ++frame )
     {
-      deltaTime = std::fmod(dist(rd), 5.f / frameCount);
+      deltaTime = std::fmod(dist(engine), targetFrameTime );
 
 
       PERF_TIME_BEGIN(PerfMarker::Total);
