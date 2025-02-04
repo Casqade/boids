@@ -9,7 +9,7 @@
 #include <utility>
 
 
-template <typename T, std::size_t Alignment = std::size_t{}>
+template <typename T, std::size_t Alignment = sizeof(std::size_t)>
 class Array
 {
   T* mData {};
@@ -140,13 +140,17 @@ std::size_t Array <T, Alignment>::alignment() const noexcept
 }
 
 
+constexpr std::size_t CacheLineSize = 64;
+
+// Single Producer, Multiple consumers
 template <typename Data>
 class RingBuffer
 {
-  Array <Data> mData {};
+  Array <Data, CacheLineSize> mData {};
 
   std::atomic_size_t mIndexWriter {};
-  std::atomic_size_t mIndexReader {};
+  alignas(CacheLineSize) std::atomic_size_t mIndexWritten {};
+  alignas(CacheLineSize) std::atomic_size_t mIndexReader {};
 
 
 public:
@@ -158,7 +162,7 @@ public:
   void init( AllocatorArena&, size_t bufferSize );
 
   void push( Data&& );
-  Data&& pop();
+  Data& pop();
 
   size_t readableElementCount() const;
 };
@@ -183,18 +187,30 @@ RingBuffer <Data>::push(
     1, std::memory_order_relaxed ) % mData.length();
 
   mData[index] = data;
+
+  mIndexWritten.fetch_add(
+    1, std::memory_order_release );
 }
 
 template <typename Data>
-Data&&
+Data&
 RingBuffer <Data>::pop()
 {
-  const auto index = mIndexReader.fetch_add(
+  const auto indexReader = mIndexReader.fetch_add(
     1, std::memory_order_relaxed );
 
-  assert(index < mIndexWriter.load(std::memory_order_acquire));
+  const auto indexWritten = mIndexWritten.load(
+    std::memory_order_acquire );
 
-  return std::move(mData[index % mData.length()]);
+  assert(indexReader < indexWritten);
+
+  if ( indexReader >= indexWritten )
+  {
+    static Data nullValue {};
+    return nullValue;
+  }
+
+  return mData[indexReader % mData.length()];
 }
 
 template <typename Data>
@@ -204,9 +220,9 @@ RingBuffer <Data>::readableElementCount() const
   const auto indexReader = mIndexReader.load(
     std::memory_order_acquire );
 
-  const auto indexWriter = mIndexWriter.load(
+  const auto indexWritten = mIndexWritten.load(
     std::memory_order_acquire );
 
-  return indexWriter - indexReader;
+  return indexWritten - indexReader;
 }
 

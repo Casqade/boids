@@ -23,15 +23,21 @@ struct ThreadPool
   using ParallelForTaskPrototype =
     std::function <void( const std::size_t rangeStart, const std::size_t rangeEnd )>;
 
+  struct alignas(64) TaskStorage
+  {
+    TaskPrototype task {};
+  };
+
 
 private:
   Array <ThreadEntry> mThreads {};
-  RingBuffer <TaskPrototype> mTasks {};
 
   std::mutex mTasksAvailableMutex {};
   std::condition_variable mTasksAvailable {};
 
   std::atomic_bool mShutdownRequested {};
+
+  RingBuffer <TaskStorage> mTasks {};
 
 
 public:

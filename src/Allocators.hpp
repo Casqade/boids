@@ -6,7 +6,7 @@
 
 
 #define IsPowerOfTwo(integer) \
-  !( integer != 1 && integer & (integer - 1) )
+  integer != 0 && !( integer & (integer - 1) )
 
 
 class AllocatorArena
@@ -52,7 +52,8 @@ AllocatorArena::allocate(
   assert(mStart != nullptr);
   assert(IsPowerOfTwo(alignment));
 
-  if ( mCurrent == mEnd )
+  if ( mCurrent == mEnd ||
+       IsPowerOfTwo(alignment) == false )
     return {};
 
 

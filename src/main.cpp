@@ -163,7 +163,7 @@ main(
 
   AllocatorArena allocator {};
   allocator.reserve(
-    sizeof(ThreadPool::TaskPrototype) * taskBufferSize +
+    sizeof(ThreadPool::TaskStorage) * taskBufferSize +
     sizeof(ThreadPool::ThreadEntry) * threadCount +
     boidMemory * boidCount +
     cellMemory * maxOccupiedCellCount +
