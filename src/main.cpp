@@ -612,8 +612,8 @@ main(
     pos /= boidCount;
     vel /= boidCount;
 
-    std::cout << "boid pos " << pos.x << ", " << pos.y << ", " << pos.z << "\n";
-    std::cout << "boid vel " << vel.x << ", " << vel.y << ", " << vel.z << "\n";
+    std::cout << "avg pos " << pos.x << ", " << pos.y << ", " << pos.z << "\n";
+    std::cout << "avg vel " << vel.x << ", " << vel.y << ", " << vel.z << "\n";
 
     printElapsedTime(PerfMarker::ResetTask, "reinit");
     printElapsedTime(PerfMarker::HashPosTask, "HashPosTask");
@@ -630,6 +630,9 @@ main(
     printElapsedTime(PerfMarker::AlignmentTask, "AlignmentTask");
     printElapsedTime(PerfMarker::CoherenceTask, "CoherenceTask");
     printElapsedTime(PerfMarker::SeparationTask, "SeparationTask");
+    std::cout << "\n";
+
+    std::cout << "Memory usage: " << allocator.bytesReserved() << " bytes\n";
 
     threadPool.deinit();
   }
