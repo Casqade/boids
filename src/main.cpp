@@ -92,10 +92,10 @@ enum PerfMarker : size_t
   VelocitySumTask,
   BoidCountSumTask,
 
-  ObstacleAvoidanceTask,
   AlignmentTask,
   CoherenceTask,
   SeparationTask,
+  ObstacleAvoidanceTask,
 
   TransformBoidsTask,
 
@@ -138,7 +138,7 @@ main(
   char* argv[] )
 {
   const std::size_t threadCount {3};
-  const std::size_t taskBufferSize = threadCount * 2;
+  const std::size_t taskBufferSize = threadCount * 3; // we don't have more than 3 concurrent parallel_fors
   const std::size_t boidCount {400'000};
   const std::size_t cellPerAxisCount {100};
   const std::size_t cellCount =
@@ -147,7 +147,12 @@ main(
   const std::size_t maxOccupiedCellCount =
     std::min(boidCount, cellCount);
 
-  const auto boidMemory =
+  const auto threadPoolMemoryFootprint =
+    sizeof(ThreadPool::ThreadEntry) * threadCount +
+    CacheLineSize +
+    sizeof(ThreadPool::TaskStorage) * taskBufferSize;
+
+  const auto boidMemoryFootprint =
     sizeof(std::size_t) +
     sizeof(Vector3) +
     sizeof(Vector3) +
@@ -156,19 +161,24 @@ main(
     sizeof(Vector3) +
     sizeof(Vector3);
 
-  const auto cellMemory =
+  const auto cellMemoryFootprint =
     sizeof(std::size_t) +
     sizeof(Vector3) +
     sizeof(Vector3);
+
+  const auto sparseCellMemoryFootprint =
+    sizeof(std::size_t);
+
+  const auto expectedAllocationsCount =
+    sizeof(std::size_t) * 13;
 
   AllocatorArena allocator {};
   allocator.reserve(
-    sizeof(ThreadPool::TaskStorage) * taskBufferSize +
-    sizeof(ThreadPool::ThreadEntry) * threadCount +
-    boidMemory * boidCount +
-    cellMemory * maxOccupiedCellCount +
-    sizeof(std::size_t) * cellCount +
-    sizeof(std::size_t) * 13 );
+    threadPoolMemoryFootprint +
+    boidMemoryFootprint * boidCount +
+    cellMemoryFootprint * maxOccupiedCellCount +
+    sparseCellMemoryFootprint * cellCount +
+    expectedAllocationsCount );
 
   static float deltaTime;
 
@@ -256,11 +266,11 @@ main(
 
 
     const auto hashPosTask =
-    [&boids, &cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&boids, &cells, tombstone = maxOccupiedCellCount] ()
     {
       size_t occupiedCellCount {};
 
-      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
+      for ( std::size_t i {}; i < boidCount; ++i )
       {
         const auto& boidPosition = boids.position[i];
 
@@ -280,7 +290,7 @@ main(
 
 
     const auto averagePositionSumTask =
-    [&boids, &occupiedCells]
+    [&boids, &occupiedCells] ()
     {
       PERF_TIME_BEGIN(PerfMarker::PositionSumTask);
 
@@ -297,7 +307,7 @@ main(
     };
 
     const auto averageVelocitySumTask =
-    [&boids, &occupiedCells]
+    [&boids, &occupiedCells] ()
     {
       PERF_TIME_BEGIN(PerfMarker::VelocitySumTask);
 
@@ -330,11 +340,12 @@ main(
 
 
     const auto calcObstacleAvoidanceTask =
-    [&boids, &rules] ()
+    [&boids, &rules]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
       PERF_TIME_BEGIN(PerfMarker::ObstacleAvoidanceTask);
 
-      for ( std::size_t i {}; i < boidCount; ++i )
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         const auto& position = boids.position[i];
 
@@ -350,11 +361,12 @@ main(
     };
 
     const auto calcAlignmentTask =
-    [&boids, &occupiedCells, &weights = rules.weights] ()
+    [&boids, &occupiedCells, &weights = rules.weights]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
-      PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
+//      PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
 
-      for ( std::size_t i {}; i < boidCount; ++i )
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         const auto cellId = boids.cellId[i];
 
@@ -383,15 +395,16 @@ main(
         assert(boids.alignment[i].z <= 1.f);
       }
 
-      PERF_TIME_END(PerfMarker::AlignmentTask);
+//      PERF_TIME_END(PerfMarker::AlignmentTask);
     };
 
     const auto calcCoherenceTask =
-    [&boids, &occupiedCells, &weights = rules.weights] ()
+    [&boids, &occupiedCells, &weights = rules.weights]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
-      PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
+//      PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
 
-      for ( std::size_t i {}; i < boidCount; ++i )
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         const auto cellId = boids.cellId[i];
         const auto neighborCount =
@@ -419,15 +432,16 @@ main(
         assert(boids.coherence[i].z <= 1.f);
       }
 
-      PERF_TIME_END(PerfMarker::CoherenceTask);
+//      PERF_TIME_END(PerfMarker::CoherenceTask);
     };
 
     const auto calcSeparationTask =
-    [&boids, &occupiedCells, &weights = rules.weights] ()
+    [&boids, &occupiedCells, &weights = rules.weights]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
-      PERF_TIME_BEGIN(PerfMarker::SeparationTask);
+//      PERF_TIME_BEGIN(PerfMarker::SeparationTask);
 
-      for ( std::size_t i {}; i < boidCount; ++i )
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         const auto cellId = boids.cellId[i];
         const auto neighborCount =
@@ -456,12 +470,13 @@ main(
         assert(boids.separation[i].z <= 1.f);
       }
 
-      PERF_TIME_END(PerfMarker::SeparationTask);
+//      PERF_TIME_END(PerfMarker::SeparationTask);
     };
 
 
     const auto transformBoidsTask =
-    [&boids, &rules] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&boids, &rules]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
 //      PERF_TIME_BEGIN(PerfMarker::TransformBoidsTask);
 
@@ -470,10 +485,10 @@ main(
         auto& velocity = boids.velocity[i];
         auto& position = boids.position[i];
 
-        const auto& obstacleAvoidance = boids.obstacleAvoidance[i];
         const auto& alignment = boids.alignment[i];
         const auto& coherence = boids.coherence[i];
         const auto& separation = boids.separation[i];
+        const auto& obstacleAvoidance = boids.obstacleAvoidance[i];
 
         const auto heading =
           alignment + coherence + separation;
@@ -541,25 +556,11 @@ main(
       PERF_TIME_BEGIN(PerfMarker::Total);
       PERF_TIME_BEGIN_COPY(PerfMarker::ResetTask, PerfMarker::Total);
 
-      threadPool.push(
-      [resetAveragePositionTask, boidCount] ()
-      {
-        resetAveragePositionTask(0, boidCount);
-      });
 
-      threadPool.push(
-      [resetAverageVelocityTask, boidCount] ()
-      {
-        resetAverageVelocityTask(0, boidCount);
-      });
-
-      threadPool.push(
-      [resetBoidCountTask, boidCount] ()
-      {
-        resetBoidCountTask(0, boidCount);
-      });
-
-//      threadPool.parallel_for(resetCellsTask, cellCount, threadCount - 3);
+      threadPool.parallel_for( resetAveragePositionTask, boidCount, 1 );
+      threadPool.parallel_for( resetAverageVelocityTask, boidCount, 1 );
+      threadPool.parallel_for( resetBoidCountTask, boidCount, 1 );
+//      threadPool.parallel_for(resetCellsTask, cellCount, 1);
       resetCellsTask(0, cellCount);
 
       threadPool.waitForTasks();
@@ -568,38 +569,46 @@ main(
       PERF_TIME_END(PerfMarker::ResetTask);
       PERF_TIME_BEGIN(PerfMarker::HashPosTask);
 
-      hashPosTask(0, boidCount);
-//      threadPool.parallel_for(hashPosTask, boidCount);
-//      threadPool.waitForTasks();
+
+      hashPosTask();
+
 
       PERF_TIME_END(PerfMarker::HashPosTask);
       PERF_TIME_BEGIN(PerfMarker::Summing);
 
+
       threadPool.push(averagePositionSumTask);
       threadPool.push(averageVelocitySumTask);
+//      threadPool.push(boidCountSumTask);
       boidCountSumTask();
 
       threadPool.waitForTasks();
 
+
       PERF_TIME_END(PerfMarker::Summing);
       PERF_TIME_BEGIN(PerfMarker::RulesCalc);
 
-      threadPool.push(calcAlignmentTask);
-      threadPool.push(calcCoherenceTask);
-      threadPool.push(calcSeparationTask);
-      calcObstacleAvoidanceTask();
+
+      threadPool.parallel_for(calcAlignmentTask, boidCount);
+      threadPool.parallel_for(calcCoherenceTask, boidCount);
+      threadPool.parallel_for(calcSeparationTask, boidCount);
+//      threadPool.parallel_for(calcObstacleAvoidanceTask, boidCount, 1);
+      calcObstacleAvoidanceTask(0, boidCount);
 
       threadPool.waitForTasks();
+
 
       PERF_TIME_END(PerfMarker::RulesCalc);
       PERF_TIME_BEGIN(PerfMarker::Transform);
 
-//      transformBoidsTask(0, boidCount);
-      threadPool.parallel_for(transformBoidsTask, boidCount);
+
+      threadPool.parallel_for(transformBoidsTask, boidCount, threadCount + 1);
       threadPool.waitForTasks();
+
 
       PERF_TIME_END(PerfMarker::Transform);
       PERF_TIME_END(PerfMarker::Total);
+
 
       for ( size_t i {}; i < PerfMarker::Count; ++i )
         timeCounter[i].update(frameCount);
@@ -620,21 +629,22 @@ main(
     std::cout << "avg pos " << pos.x << ", " << pos.y << ", " << pos.z << "\n";
     std::cout << "avg vel " << vel.x << ", " << vel.y << ", " << vel.z << "\n";
 
-    printElapsedTime(PerfMarker::ResetTask, "reinit");
+    printElapsedTime(PerfMarker::ResetTask, "ResetTask");
     printElapsedTime(PerfMarker::HashPosTask, "HashPosTask");
     printElapsedTime(PerfMarker::Summing, "Summing");
     printElapsedTime(PerfMarker::RulesCalc, "RulesCalc");
     printElapsedTime(PerfMarker::Transform, "Transform");
     printElapsedTime(PerfMarker::Total, "Total");
     std::cout << "\n";
+
     printElapsedTime(PerfMarker::PositionSumTask, "PositionSumTask");
     printElapsedTime(PerfMarker::VelocitySumTask, "VelocitySumTask");
     printElapsedTime(PerfMarker::BoidCountSumTask, "BoidCountSumTask");
 
+//    printElapsedTime(PerfMarker::AlignmentTask, "AlignmentTask");
+//    printElapsedTime(PerfMarker::CoherenceTask, "CoherenceTask");
+//    printElapsedTime(PerfMarker::SeparationTask, "SeparationTask");
     printElapsedTime(PerfMarker::ObstacleAvoidanceTask, "ObstacleAvoidanceTask");
-    printElapsedTime(PerfMarker::AlignmentTask, "AlignmentTask");
-    printElapsedTime(PerfMarker::CoherenceTask, "CoherenceTask");
-    printElapsedTime(PerfMarker::SeparationTask, "SeparationTask");
     std::cout << "\n";
 
     std::cout << "Memory usage: " << allocator.bytesReserved() << " bytes\n";

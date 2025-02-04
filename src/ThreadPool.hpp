@@ -50,7 +50,6 @@ public:
   void deinit();
 
   void push( TaskPrototype&& );
-
   void push( std::function <void()>&& task );
 
   void parallel_for(
@@ -58,5 +57,6 @@ public:
     const std::size_t iters,
     std::size_t threadCount = {} );
 
+  bool doOneTask();
   void waitForTasks();
 };

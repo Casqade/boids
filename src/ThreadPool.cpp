@@ -46,9 +46,9 @@ ThreadPool::init(
       mThreads[threadId].isBusy.store(
         true, std::memory_order_release );
 
-      lock.unlock();
-
       auto& task = mTasks.pop();
+
+      lock.unlock();
 
       task.task(threadId);
 
@@ -110,31 +110,58 @@ ThreadPool::parallel_for(
   if ( threadCount == 0 )
     threadCount = mThreads.length();
 
-  const auto itersPerThread = iters / (threadCount + 1);
 
-  for ( std::size_t threadId {}, rangeEnd {}; rangeEnd < iters; ++threadId )
+  size_t itersPerThread = iters / threadCount;
+
+  if ( iters % threadCount != 0 )
+    itersPerThread += 1;
+
+
+  for ( std::size_t threadId {}, rangeEnd {}; threadId < threadCount; ++threadId )
   {
-    const auto rangeStart = threadId * itersPerThread;
+    const auto rangeStart =
+      threadId * itersPerThread;
 
     rangeEnd = std::min(
-      (threadId + 1) * itersPerThread,
+      rangeStart + itersPerThread,
       iters );
 
-    if ( rangeEnd != iters )
-      push(
-      [task, rangeStart, rangeEnd] ( const std::size_t threadId )
-      {
-        task(rangeStart, rangeEnd);
-      });
-    else
+    push(
+    [task, rangeStart, rangeEnd] ( const std::size_t threadId )
+    {
       task(rangeStart, rangeEnd);
+    });
   }
+}
+
+bool
+ThreadPool::doOneTask()
+{
+  if ( mTasks.readableElementCount() == 0 )
+    return false;
+
+
+  std::unique_lock lock {mTasksAvailableMutex};
+
+  if ( mTasks.readableElementCount() == 0 )
+  {
+    lock.unlock();
+    return false;
+  }
+
+  auto& task = mTasks.pop();
+
+  lock.unlock();
+
+  task.task(0);
+
+  return true;
 }
 
 void
 ThreadPool::waitForTasks()
 {
-  while ( mTasks.readableElementCount() > 0 )
+  while ( doOneTask() == true )
     ;
 
   for ( size_t threadId {}; threadId < mThreads.length(); ++threadId )
