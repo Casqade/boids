@@ -170,6 +170,7 @@ main(
     sizeof(std::size_t) * cellCount +
     sizeof(std::size_t) * 13 );
 
+  static float deltaTime;
 
   {
     auto mask = initAffinityMask();
@@ -219,6 +220,306 @@ main(
       }
     };
 
+
+    const auto resetCellsTask =
+    [&cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      std::fill_n(
+        cells.data() + rangeStart,
+        rangeEnd - rangeStart,
+        tombstone );
+    };
+
+    const auto resetAveragePositionTask =
+    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      for ( size_t i = rangeStart; i < rangeEnd; ++i )
+        occupiedCells.averagePosition[i] = {};
+    };
+
+    const auto resetAverageVelocityTask =
+    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      for ( size_t i = rangeStart; i < rangeEnd; ++i )
+        occupiedCells.averageVelocity[i] = {};
+    };
+
+    const auto resetBoidCountTask =
+    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      for ( size_t i = rangeStart; i < rangeEnd; ++i )
+        occupiedCells.boidCount[i] = {};
+    };
+
+
+    const auto hashPosTask =
+    [&boids, &cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      size_t occupiedCellCount {};
+
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
+      {
+        const auto& boidPosition = boids.position[i];
+
+//        index into sparse array
+        const auto cellSparseIdx = hashPos(
+          boidPosition, cellPerAxisCount );
+
+//        index into dense array
+        auto& cellDenseIdx = cells[cellSparseIdx];
+
+        if ( cellDenseIdx == tombstone )
+          cellDenseIdx = occupiedCellCount++;
+
+        boids.cellId[i] = cellDenseIdx;
+      }
+    };
+
+
+    const auto averagePositionSumTask =
+    [&boids, &occupiedCells]
+    {
+      PERF_TIME_BEGIN(PerfMarker::PositionSumTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+
+        const auto& boidPosition = boids.position[i];
+
+        occupiedCells.averagePosition[cellId] += boidPosition;
+      }
+
+      PERF_TIME_END(PerfMarker::PositionSumTask);
+    };
+
+    const auto averageVelocitySumTask =
+    [&boids, &occupiedCells]
+    {
+      PERF_TIME_BEGIN(PerfMarker::VelocitySumTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+
+        const auto& boidVelocity = boids.velocity[i];
+
+        occupiedCells.averageVelocity[cellId] += boidVelocity;
+      }
+
+      PERF_TIME_END(PerfMarker::VelocitySumTask);
+    };
+
+    const auto boidCountSumTask =
+    [&boids, &occupiedCells] ()
+    {
+      PERF_TIME_BEGIN(PerfMarker::BoidCountSumTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+
+        occupiedCells.boidCount[cellId] += 1;
+      }
+
+      PERF_TIME_END(PerfMarker::BoidCountSumTask);
+    };
+
+
+    const auto calcObstacleAvoidanceTask =
+    [&boids, &rules] ()
+    {
+      PERF_TIME_BEGIN(PerfMarker::ObstacleAvoidanceTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto& position = boids.position[i];
+
+        boids.obstacleAvoidance[i] =
+        {
+          getAvoidance(position.x, rules.obstacleAvoidanceDistance),
+          getAvoidance(position.y, rules.obstacleAvoidanceDistance),
+          getAvoidance(position.z, rules.obstacleAvoidanceDistance)
+        };
+      }
+
+      PERF_TIME_END(PerfMarker::ObstacleAvoidanceTask);
+    };
+
+    const auto calcAlignmentTask =
+    [&boids, &occupiedCells, &weights = rules.weights] ()
+    {
+      PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+
+        const auto neighborCount =
+          occupiedCells.boidCount[cellId];
+
+//        assert(neighborCount > 0);
+
+        const auto& velocity = boids.velocity[i];
+
+        const auto& averageVelocity =
+          occupiedCells.averageVelocity[cellId];
+
+        const auto alignment =
+          averageVelocity / neighborCount - velocity;
+
+        boids.alignment[i] =
+          weights.alignment *
+          alignment.normalized();
+
+        assert(boids.alignment[i].x >= -1.f);
+        assert(boids.alignment[i].y >= -1.f);
+        assert(boids.alignment[i].z >= -1.f);
+        assert(boids.alignment[i].x <= 1.f);
+        assert(boids.alignment[i].y <= 1.f);
+        assert(boids.alignment[i].z <= 1.f);
+      }
+
+      PERF_TIME_END(PerfMarker::AlignmentTask);
+    };
+
+    const auto calcCoherenceTask =
+    [&boids, &occupiedCells, &weights = rules.weights] ()
+    {
+      PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+        const auto neighborCount =
+          occupiedCells.boidCount[cellId];
+
+//        assert(neighborCount > 0);
+
+        const auto& position = boids.position[i];
+
+        const auto& averagePosition =
+          occupiedCells.averagePosition[cellId];
+
+        const auto coherence =
+          averagePosition / neighborCount - position;
+
+        boids.coherence[i] =
+          weights.coherence *
+          coherence.normalized();
+
+        assert(boids.coherence[i].x >= -1.f);
+        assert(boids.coherence[i].y >= -1.f);
+        assert(boids.coherence[i].z >= -1.f);
+        assert(boids.coherence[i].x <= 1.f);
+        assert(boids.coherence[i].y <= 1.f);
+        assert(boids.coherence[i].z <= 1.f);
+      }
+
+      PERF_TIME_END(PerfMarker::CoherenceTask);
+    };
+
+    const auto calcSeparationTask =
+    [&boids, &occupiedCells, &weights = rules.weights] ()
+    {
+      PERF_TIME_BEGIN(PerfMarker::SeparationTask);
+
+      for ( std::size_t i {}; i < boidCount; ++i )
+      {
+        const auto cellId = boids.cellId[i];
+        const auto neighborCount =
+          occupiedCells.boidCount[cellId];
+
+//        assert(neighborCount > 0);
+
+        const auto& position = boids.position[i];
+
+        const auto& averagePosition =
+          occupiedCells.averagePosition[cellId];
+
+        const auto separation =
+          position - averagePosition / neighborCount;
+
+        boids.separation[i] =
+//          averagePosition;
+          weights.separation *
+          separation.normalized();
+
+        assert(boids.separation[i].x >= -1.f);
+        assert(boids.separation[i].y >= -1.f);
+        assert(boids.separation[i].z >= -1.f);
+        assert(boids.separation[i].x <= 1.f);
+        assert(boids.separation[i].y <= 1.f);
+        assert(boids.separation[i].z <= 1.f);
+      }
+
+      PERF_TIME_END(PerfMarker::SeparationTask);
+    };
+
+
+    const auto transformBoidsTask =
+    [&boids, &rules] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+//      PERF_TIME_BEGIN(PerfMarker::TransformBoidsTask);
+
+      for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
+      {
+        auto& velocity = boids.velocity[i];
+        auto& position = boids.position[i];
+
+        const auto& obstacleAvoidance = boids.obstacleAvoidance[i];
+        const auto& alignment = boids.alignment[i];
+        const auto& coherence = boids.coherence[i];
+        const auto& separation = boids.separation[i];
+
+        const auto heading =
+          alignment + coherence + separation;
+
+        const auto desiredVelocity =
+          obstacleAvoidance.length_squared() > 0.f
+            ? obstacleAvoidance.normalized()
+            : heading.normalized();
+
+        const auto prevVelocity = velocity;
+
+        velocity =
+          (velocity + (desiredVelocity - velocity) * deltaTime).normalized();
+
+        assert(velocity.x >= -1.f);
+        assert(velocity.y >= -1.f);
+        assert(velocity.z >= -1.f);
+        assert(velocity.x <= 1.f);
+        assert(velocity.y <= 1.f);
+        assert(velocity.z <= 1.f);
+
+        assert(prevVelocity.x >= -1.f);
+        assert(prevVelocity.y >= -1.f);
+        assert(prevVelocity.z >= -1.f);
+        assert(prevVelocity.x <= 1.f);
+        assert(prevVelocity.y <= 1.f);
+        assert(prevVelocity.z <= 1.f);
+
+        position += velocity * rules.maxSpeed * deltaTime;
+
+        assert(position.x >= 0.f);
+        assert(position.y >= 0.f);
+        assert(position.z >= 0.f);
+        assert(position.x <= 1.f);
+        assert(position.y <= 1.f);
+        assert(position.z <= 1.f);
+        continue;
+
+        boids.position[i] =
+        {
+          std::fmod(boids.position[i].x + velocity.x * deltaTime, 1.f),
+          std::fmod(boids.position[i].y + velocity.y * deltaTime, 1.f),
+          std::fmod(boids.position[i].z + velocity.z * deltaTime, 1.f),
+        };
+      }
+
+//      PERF_TIME_END(PerfMarker::TransformBoidsTask);
+    };
+
     threadPool.parallel_for(posInitTask, boidCount);
     threadPool.waitForTasks();
 
@@ -229,41 +530,11 @@ main(
 
     for ( std::size_t frame {}; frame < frameCount; ++frame )
     {
-      const float delta = std::fmod(dist(rd), 5.f / frameCount);
+      deltaTime = std::fmod(dist(rd), 5.f / frameCount);
+
 
       PERF_TIME_BEGIN(PerfMarker::Total);
       PERF_TIME_BEGIN_COPY(PerfMarker::ResetTask, PerfMarker::Total);
-
-      const auto resetCellsTask =
-      [&cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-        std::fill_n(
-          cells.data() + rangeStart,
-          rangeEnd - rangeStart,
-          tombstone );
-      };
-
-      const auto resetAveragePositionTask =
-      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-        for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          occupiedCells.averagePosition[i] = {};
-      };
-
-      const auto resetAverageVelocityTask =
-      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-        for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          occupiedCells.averageVelocity[i] = {};
-      };
-
-      const auto resetBoidCountTask =
-      [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-        for ( size_t i = rangeStart; i < rangeEnd; ++i )
-          occupiedCells.boidCount[i] = {};
-      };
-
 
       threadPool.push(
       [resetAveragePositionTask, boidCount] ()
@@ -284,7 +555,6 @@ main(
       });
 
 //      threadPool.parallel_for(resetCellsTask, cellCount, threadCount - 3);
-
       resetCellsTask(0, cellCount);
 
       threadPool.waitForTasks();
@@ -293,85 +563,12 @@ main(
       PERF_TIME_END(PerfMarker::ResetTask);
       PERF_TIME_BEGIN(PerfMarker::HashPosTask);
 
-
-      const auto hashPosTask =
-      [&boids, &cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-        size_t occupiedCellCount {};
-
-        for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
-        {
-          const auto& boidPosition = boids.position[i];
-
-//          index into sparse array
-          const auto cellSparseIdx = hashPos(
-            boidPosition, cellPerAxisCount );
-
-//          index into dense array
-          auto& cellDenseIdx = cells[cellSparseIdx];
-
-          if ( cellDenseIdx == tombstone )
-            cellDenseIdx = occupiedCellCount++;
-
-          boids.cellId[i] = cellDenseIdx;
-        }
-      };
-
       hashPosTask(0, boidCount);
-      //    threadPool.parallel_for(hashPosTask, boidCount);
-      //    threadPool.waitForTasks();
+//      threadPool.parallel_for(hashPosTask, boidCount);
+//      threadPool.waitForTasks();
 
       PERF_TIME_END(PerfMarker::HashPosTask);
       PERF_TIME_BEGIN(PerfMarker::Summing);
-
-      const auto averagePositionSumTask =
-      [&boids, &occupiedCells]
-      {
-        PERF_TIME_BEGIN(PerfMarker::PositionSumTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-
-          const auto& boidPosition = boids.position[i];
-
-          occupiedCells.averagePosition[cellId] += boidPosition;
-        }
-
-        PERF_TIME_END(PerfMarker::PositionSumTask);
-      };
-
-      const auto averageVelocitySumTask =
-      [&boids, &occupiedCells]
-      {
-        PERF_TIME_BEGIN(PerfMarker::VelocitySumTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-
-          const auto& boidVelocity = boids.velocity[i];
-
-          occupiedCells.averageVelocity[cellId] += boidVelocity;
-        }
-
-        PERF_TIME_END(PerfMarker::VelocitySumTask);
-      };
-
-      const auto boidCountSumTask =
-      [&boids, &occupiedCells] ()
-      {
-        PERF_TIME_BEGIN(PerfMarker::BoidCountSumTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-
-          occupiedCells.boidCount[cellId] += 1;
-        }
-
-        PERF_TIME_END(PerfMarker::BoidCountSumTask);
-      };
 
       threadPool.push(averagePositionSumTask);
       threadPool.push(averageVelocitySumTask);
@@ -379,202 +576,8 @@ main(
 
       threadPool.waitForTasks();
 
-
       PERF_TIME_END(PerfMarker::Summing);
       PERF_TIME_BEGIN(PerfMarker::RulesCalc);
-
-      const auto calcObstacleAvoidanceTask =
-      [&boids, &rules] ()
-      {
-        PERF_TIME_BEGIN(PerfMarker::ObstacleAvoidanceTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto& position = boids.position[i];
-
-          boids.obstacleAvoidance[i] =
-          {
-            getAvoidance(position.x, rules.obstacleAvoidanceDistance),
-            getAvoidance(position.y, rules.obstacleAvoidanceDistance),
-            getAvoidance(position.z, rules.obstacleAvoidanceDistance)
-          };
-        }
-
-        PERF_TIME_END(PerfMarker::ObstacleAvoidanceTask);
-      };
-
-      const auto calcAlignmentTask =
-      [&boids, &occupiedCells, &weights = rules.weights] ()
-      {
-        PERF_TIME_BEGIN(PerfMarker::AlignmentTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-
-          const auto neighborCount =
-            occupiedCells.boidCount[cellId];
-
-//          assert(neighborCount > 0);
-
-          const auto& velocity = boids.velocity[i];
-
-          const auto& averageVelocity =
-            occupiedCells.averageVelocity[cellId];
-
-          const auto alignment =
-            averageVelocity / neighborCount - velocity;
-
-          boids.alignment[i] =
-            weights.alignment *
-            alignment.normalized();
-
-          assert(boids.alignment[i].x >= -1.f);
-          assert(boids.alignment[i].y >= -1.f);
-          assert(boids.alignment[i].z >= -1.f);
-          assert(boids.alignment[i].x <= 1.f);
-          assert(boids.alignment[i].y <= 1.f);
-          assert(boids.alignment[i].z <= 1.f);
-        }
-
-        PERF_TIME_END(PerfMarker::AlignmentTask);
-      };
-
-      const auto calcCoherenceTask =
-      [&boids, &occupiedCells, &weights = rules.weights] ()
-      {
-        PERF_TIME_BEGIN(PerfMarker::CoherenceTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-          const auto neighborCount =
-            occupiedCells.boidCount[cellId];
-
-//          assert(neighborCount > 0);
-
-          const auto& position = boids.position[i];
-
-          const auto& averagePosition =
-            occupiedCells.averagePosition[cellId];
-
-          const auto coherence =
-            averagePosition / neighborCount - position;
-
-          boids.coherence[i] =
-            weights.coherence *
-            coherence.normalized();
-
-          assert(boids.coherence[i].x >= -1.f);
-          assert(boids.coherence[i].y >= -1.f);
-          assert(boids.coherence[i].z >= -1.f);
-          assert(boids.coherence[i].x <= 1.f);
-          assert(boids.coherence[i].y <= 1.f);
-          assert(boids.coherence[i].z <= 1.f);
-        }
-
-        PERF_TIME_END(PerfMarker::CoherenceTask);
-      };
-
-      const auto calcSeparationTask =
-      [&boids, &occupiedCells, &weights = rules.weights] ()
-      {
-        PERF_TIME_BEGIN(PerfMarker::SeparationTask);
-
-        for ( std::size_t i {}; i < boidCount; ++i )
-        {
-          const auto cellId = boids.cellId[i];
-          const auto neighborCount =
-            occupiedCells.boidCount[cellId];
-
-//          assert(neighborCount > 0);
-
-          const auto& position = boids.position[i];
-
-          const auto& averagePosition =
-            occupiedCells.averagePosition[cellId];
-
-          const auto separation =
-            position - averagePosition / neighborCount;
-
-          boids.separation[i] =
-//            averagePosition;
-            weights.separation *
-            separation.normalized();
-
-          assert(boids.separation[i].x >= -1.f);
-          assert(boids.separation[i].y >= -1.f);
-          assert(boids.separation[i].z >= -1.f);
-          assert(boids.separation[i].x <= 1.f);
-          assert(boids.separation[i].y <= 1.f);
-          assert(boids.separation[i].z <= 1.f);
-        }
-
-        PERF_TIME_END(PerfMarker::SeparationTask);
-      };
-
-      const auto transformBoidsTask =
-      [&boids, &rules, delta] ( const std::size_t rangeStart, const std::size_t rangeEnd )
-      {
-//        PERF_TIME_BEGIN(PerfMarker::TransformBoidsTask);
-
-        for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
-        {
-          auto& velocity = boids.velocity[i];
-          auto& position = boids.position[i];
-
-          const auto& obstacleAvoidance = boids.obstacleAvoidance[i];
-          const auto& alignment = boids.alignment[i];
-          const auto& coherence = boids.coherence[i];
-          const auto& separation = boids.separation[i];
-
-          const auto heading =
-            alignment + coherence + separation;
-
-          const auto desiredVelocity =
-            obstacleAvoidance.length_squared() > 0.f
-              ? obstacleAvoidance.normalized()
-              : heading.normalized();
-
-          const auto prevVelocity = velocity;
-
-          velocity =
-            (velocity + (desiredVelocity - velocity) * delta).normalized();
-
-          assert(velocity.x >= -1.f);
-          assert(velocity.y >= -1.f);
-          assert(velocity.z >= -1.f);
-          assert(velocity.x <= 1.f);
-          assert(velocity.y <= 1.f);
-          assert(velocity.z <= 1.f);
-
-          assert(prevVelocity.x >= -1.f);
-          assert(prevVelocity.y >= -1.f);
-          assert(prevVelocity.z >= -1.f);
-          assert(prevVelocity.x <= 1.f);
-          assert(prevVelocity.y <= 1.f);
-          assert(prevVelocity.z <= 1.f);
-
-          position += velocity * rules.maxSpeed * delta;
-
-          assert(position.x >= 0.f);
-          assert(position.y >= 0.f);
-          assert(position.z >= 0.f);
-          assert(position.x <= 1.f);
-          assert(position.y <= 1.f);
-          assert(position.z <= 1.f);
-          continue;
-
-          boids.position[i] =
-          {
-            std::fmod(boids.position[i].x + velocity.x * delta, 1.f),
-            std::fmod(boids.position[i].y + velocity.y * delta, 1.f),
-            std::fmod(boids.position[i].z + velocity.z * delta, 1.f),
-          };
-        }
-
-//        PERF_TIME_END(PerfMarker::TransformBoidsTask);
-      };
 
       threadPool.push(calcAlignmentTask);
       threadPool.push(calcCoherenceTask);
