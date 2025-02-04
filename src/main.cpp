@@ -523,7 +523,8 @@ main(
 //      PERF_TIME_END(PerfMarker::TransformBoidsTask);
     };
 
-    threadPool.parallel_for(posInitTask, boidCount);
+
+    threadPool.parallel_for(posInitTask, boidCount, 1);
     threadPool.waitForTasks();
 
 
