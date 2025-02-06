@@ -222,3 +222,25 @@ RingBuffer <Data>::readableElementCount() const
     std::memory_order_relaxed );
 }
 
+
+class Swapchain
+{
+  std::atomic_size_t mMiddle {1};
+
+  alignas(CacheLineSize) std::size_t mBack {};
+  alignas(CacheLineSize) std::size_t mFront {2};
+
+
+public:
+  Swapchain() = default;
+
+  void swap();
+  void retire();
+
+  std::size_t back() const;
+  std::size_t front() const;
+
+
+private:
+  void swap( std::size_t& bufferIndex );
+};

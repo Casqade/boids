@@ -27,6 +27,12 @@ struct BoidRuleset
   float maxSpeed {0.1f};
 };
 
+struct FrameData
+{
+  Array <Vector3> position {};
+  Array <Vector3> velocity {};
+};
+
 struct BoidData
 {
   Array <std::size_t> cellId {};
@@ -152,6 +158,10 @@ main(
     CacheLineSize +
     sizeof(ThreadPool::TaskStorage) * taskBufferSize;
 
+  const auto frameDataMemoryFootprint =
+    sizeof(Vector3) +
+    sizeof(Vector3);
+
   const auto boidMemoryFootprint =
     sizeof(std::size_t) +
     sizeof(Vector3) +
@@ -170,11 +180,12 @@ main(
     sizeof(std::size_t);
 
   const auto expectedAllocationsCount =
-    sizeof(std::size_t) * 13;
+    sizeof(std::size_t) * 19;
 
   AllocatorArena allocator {};
   allocator.reserve(
     threadPoolMemoryFootprint +
+    frameDataMemoryFootprint * boidCount * 3 +
     boidMemoryFootprint * boidCount +
     cellMemoryFootprint * maxOccupiedCellCount +
     sparseCellMemoryFootprint * cellCount +
@@ -191,6 +202,25 @@ main(
     ThreadPool threadPool {};
     threadPool.init(
       allocator, taskBufferSize, threadCount, 2 );
+
+
+    Swapchain boidSwapChain {};
+
+    FrameData frameData[3]
+    {
+      {
+        {allocator, boidCount},
+        {allocator, boidCount},
+      },
+      {
+        {allocator, boidCount},
+        {allocator, boidCount},
+      },
+      {
+        {allocator, boidCount},
+        {allocator, boidCount},
+      },
+    };
 
 
     BoidData boids
@@ -231,6 +261,29 @@ main(
         boids.position[i] = { dist(engine), dist(engine), dist(engine) };
 //        boids.velocity[i] = { dist(engine), dist(engine), dist(engine) };
       }
+    };
+
+
+    const auto copyPositionsTask =
+    [&boids, &frameData, &boidSwapChain]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      const auto bufferIndex = boidSwapChain.back();
+      auto& framePositions = frameData[bufferIndex].position;
+
+      for ( size_t i = rangeStart; i < rangeEnd; ++i )
+        framePositions[i] = boids.position[i];
+    };
+
+    const auto copyVelocitiesTask =
+    [&boids, &frameData, &boidSwapChain]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    {
+      const auto bufferIndex = boidSwapChain.back();
+      auto& frameVelocities = frameData[bufferIndex].velocity;
+
+      for ( size_t i = rangeStart; i < rangeEnd; ++i )
+        frameVelocities[i] = boids.velocity[i];
     };
 
 
@@ -577,12 +630,16 @@ main(
       PERF_TIME_BEGIN(PerfMarker::Summing);
 
 
+      threadPool.parallel_for(copyPositionsTask, boidCount, 1);
+      threadPool.parallel_for(copyVelocitiesTask, boidCount, 1);
       threadPool.push(averagePositionSumTask);
       threadPool.push(averageVelocitySumTask);
 //      threadPool.push(boidCountSumTask);
       boidCountSumTask();
 
       threadPool.waitForTasks();
+
+      boidSwapChain.swap();
 
 
       PERF_TIME_END(PerfMarker::Summing);
