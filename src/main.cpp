@@ -194,6 +194,7 @@ main(
     sparseCellMemoryFootprint * cellCount +
     expectedAllocationsCount );
 
+
   static float deltaTime;
 
   {
@@ -291,7 +292,8 @@ main(
 
 
     const auto resetCellsTask =
-    [&cells, tombstone = maxOccupiedCellCount] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&cells, tombstone = maxOccupiedCellCount]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
       std::fill_n(
         cells.data() + rangeStart,
@@ -300,21 +302,24 @@ main(
     };
 
     const auto resetAveragePositionTask =
-    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&occupiedCells]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
       for ( size_t i = rangeStart; i < rangeEnd; ++i )
         occupiedCells.averagePosition[i] = {};
     };
 
     const auto resetAverageVelocityTask =
-    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&occupiedCells]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
       for ( size_t i = rangeStart; i < rangeEnd; ++i )
         occupiedCells.averageVelocity[i] = {};
     };
 
     const auto resetBoidCountTask =
-    [&occupiedCells] ( const std::size_t rangeStart, const std::size_t rangeEnd )
+    [&occupiedCells]
+    ( const std::size_t rangeStart, const std::size_t rangeEnd )
     {
       for ( size_t i = rangeStart; i < rangeEnd; ++i )
         occupiedCells.boidCount[i] = {};
@@ -613,9 +618,9 @@ main(
       PERF_TIME_BEGIN_COPY(PerfMarker::ResetTask, PerfMarker::Total);
 
 
-      threadPool.parallel_for( resetAveragePositionTask, boidCount, 1 );
-      threadPool.parallel_for( resetAverageVelocityTask, boidCount, 1 );
-      threadPool.parallel_for( resetBoidCountTask, boidCount, 1 );
+      threadPool.parallel_for(resetAveragePositionTask, boidCount, 1);
+      threadPool.parallel_for(resetAverageVelocityTask, boidCount, 1);
+      threadPool.parallel_for(resetBoidCountTask, boidCount, 1);
 //      threadPool.parallel_for(resetCellsTask, cellCount, 1);
       resetCellsTask(0, cellCount);
 
