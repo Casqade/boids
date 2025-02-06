@@ -44,7 +44,7 @@ ThreadPool::init(
         return;
 
       mThreads[threadId].isBusy.store(
-        true, std::memory_order_release );
+        true, std::memory_order_relaxed );
 
       auto& task = mTasks.pop();
 
@@ -69,7 +69,7 @@ ThreadPool::deinit()
     std::lock_guard lock {mTasksAvailableMutex};
 
     mShutdownRequested.store(
-      true, std::memory_order_release );
+      true, std::memory_order_relaxed );
   }
 
   mTasksAvailable.notify_all();

@@ -149,7 +149,7 @@ class RingBuffer
   Array <Data, CacheLineSize> mData {};
 
   std::atomic_size_t mIndexWriter {};
-  alignas(CacheLineSize) std::atomic_size_t mIndexWritten {};
+  alignas(CacheLineSize) std::atomic_size_t mReadableElements {};
   alignas(CacheLineSize) std::atomic_size_t mIndexReader {};
 
 
@@ -188,7 +188,7 @@ RingBuffer <Data>::push(
 
   mData[index] = data;
 
-  mIndexWritten.fetch_add(
+  mReadableElements.fetch_add(
     1, std::memory_order_release );
 }
 
@@ -196,19 +196,20 @@ template <typename Data>
 Data&
 RingBuffer <Data>::pop()
 {
-  const auto indexReader = mIndexReader.fetch_add(
-    1, std::memory_order_relaxed );
+  const bool canRead =
+    mReadableElements.fetch_sub(
+      1, std::memory_order_acquire );
 
-  const auto indexWritten = mIndexWritten.load(
-    std::memory_order_acquire );
+  assert(canRead == true);
 
-  assert(indexReader < indexWritten);
-
-  if ( indexReader >= indexWritten )
+  if ( canRead == false )
   {
     static Data nullValue {};
     return nullValue;
   }
+
+  const auto indexReader = mIndexReader.fetch_add(
+    1, std::memory_order_relaxed );
 
   return mData[indexReader % mData.length()];
 }
@@ -217,12 +218,7 @@ template <typename Data>
 size_t
 RingBuffer <Data>::readableElementCount() const
 {
-  const auto indexReader = mIndexReader.load(
-    std::memory_order_acquire );
-
-  const auto indexWritten = mIndexWritten.load(
-    std::memory_order_acquire );
-
-  return indexWritten - indexReader;
+  return mReadableElements.load(
+    std::memory_order_relaxed );
 }
 
