@@ -143,7 +143,7 @@ main(
   int argc,
   char* argv[] )
 {
-  const std::size_t threadCount {3};
+  const std::size_t threadCount {5};
   const std::size_t taskBufferSize = threadCount * 3; // we don't have more than 3 concurrent parallel_fors
   const std::size_t boidCount {400'000};
   const std::size_t cellPerAxisCount {100};
@@ -685,6 +685,9 @@ main(
 
     std::cout << "avg pos " << pos.x << ", " << pos.y << ", " << pos.z << "\n";
     std::cout << "avg vel " << vel.x << ", " << vel.y << ", " << vel.z << "\n";
+    std::cout << "\n";
+
+    std::cout << "Threads: " << threadCount + 1 << "\n";
 
     printElapsedTime(PerfMarker::ResetTask, "ResetTask");
     printElapsedTime(PerfMarker::HashPosTask, "HashPosTask");
