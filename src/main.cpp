@@ -1,6 +1,7 @@
 #include "Allocators.hpp"
 #include "Containers.hpp"
 #include "Vector.hpp"
+#include "Logger.hpp"
 #include "ThreadPool.hpp"
 #include "ThreadAffinity.hpp"
 #include "PerformanceCounter.hpp"
@@ -143,6 +144,8 @@ main(
   int argc,
   char* argv[] )
 {
+  createLogger("Boids");
+
   const std::size_t threadCount {5};
   const std::size_t taskBufferSize = threadCount * 3; // we don't have more than 3 concurrent parallel_fors
   const std::size_t boidCount {400'000};
@@ -714,6 +717,8 @@ main(
 
 
   allocator.free();
+
+  destroyLogger();
 
   return 0;
 }
