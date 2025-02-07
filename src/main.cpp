@@ -146,6 +146,18 @@ main(
 {
   createLogger("Boids");
 
+  cqdeVk::Allocator vkAllocator {};
+
+  const VkAllocationCallbacks AllocatorCallbacks
+  {
+    .pUserData = &vkAllocator,
+    .pfnAllocation = cqdeVk::allocate,
+    .pfnReallocation = cqdeVk::reallocate,
+    .pfnFree = cqdeVk::free,
+    .pfnInternalAllocation = cqdeVk::internalAllocate,
+    .pfnInternalFree = cqdeVk::internalFree,
+  };
+
   const std::size_t threadCount {5};
   const std::size_t taskBufferSize = threadCount * 3; // we don't have more than 3 concurrent parallel_fors
   const std::size_t boidCount {400'000};
@@ -716,6 +728,8 @@ main(
     std::cout << "\n";
 
     std::cout << "Memory usage: " << allocator.bytesReserved() << " bytes\n";
+    std::cout << "Memory usage (Vulkan):\n";
+    vkAllocator.printMemoryUsage();
 
     threadPool.deinit();
   }
