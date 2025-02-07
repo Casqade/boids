@@ -178,8 +178,12 @@ if(${GLM_FORCE_INLINE})
 endif()
 
 
-target_compile_definitions(${TARGET} PRIVATE
+target_compile_definitions(${TARGET}
+PRIVATE
   NOMINMAX
+
+PUBLIC
+  VULKAN_HPP_NO_EXCEPTIONS
 )
 
 target_compile_definitions(glfw INTERFACE
