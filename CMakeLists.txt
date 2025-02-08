@@ -20,6 +20,7 @@ target_sources(
 
     src/Allocators.cpp
     src/Containers.cpp
+    src/Frontend.cpp
     src/Logger.cpp
     src/ThreadAffinity.cpp
     src/ThreadPool.cpp

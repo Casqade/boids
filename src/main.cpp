@@ -1,5 +1,6 @@
 #include "Allocators.hpp"
 #include "Containers.hpp"
+#include "Frontend.hpp"
 #include "Vector.hpp"
 #include "Logger.hpp"
 #include "ThreadPool.hpp"
@@ -148,7 +149,7 @@ main(
 
   cqdeVk::Allocator vkAllocator {};
 
-  const VkAllocationCallbacks AllocatorCallbacks
+  const VkAllocationCallbacks vkAllocatorCallbacks
   {
     .pUserData = &vkAllocator,
     .pfnAllocation = cqdeVk::allocate,
@@ -157,6 +158,40 @@ main(
     .pfnInternalAllocation = cqdeVk::internalAllocate,
     .pfnInternalFree = cqdeVk::internalFree,
   };
+
+  Frontend frontend
+  {
+    .allocator = &vkAllocatorCallbacks,
+  };
+
+  const VkApplicationInfo applicationInfo
+  {
+    .pApplicationName = "Boids",
+    .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+    .pEngineName = "Boids",
+    .engineVersion = VK_MAKE_VERSION(1, 0, 0),
+    .apiVersion = VK_API_VERSION_1_3,
+  };
+
+  auto result = initializeFrontend(
+    frontend,
+    applicationInfo,
+    VkExtent2D{800, 600} );
+
+  if ( result.success() == false )
+  {
+    if ( result.code != VK_ERROR_UNKNOWN )
+      LOG_ERROR("Vulkan error {}: {}", (int) result.code, result.message);
+    else
+      LOG_ERROR("Vulkan initialization error: {}", result.message);
+
+    deinitializeFrontend(frontend);
+
+    destroyLogger();
+
+    return result.code;
+  }
+
 
   const std::size_t threadCount {5};
   const std::size_t taskBufferSize = threadCount * 3; // we don't have more than 3 concurrent parallel_fors
@@ -736,6 +771,8 @@ main(
 
 
   allocator.free();
+
+  deinitializeFrontend(frontend);
 
   destroyLogger();
 
