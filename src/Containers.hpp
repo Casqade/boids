@@ -226,9 +226,12 @@ RingBuffer <Data>::readableElementCount() const
 class Swapchain
 {
   std::atomic_size_t mMiddle {1};
+  std::atomic_size_t mMiddleBufferSwaps {};
 
   alignas(CacheLineSize) std::size_t mBack {};
   alignas(CacheLineSize) std::size_t mFront {2};
+
+  std::size_t mMiddleBufferSwapsPrev {};
 
 
 public:
@@ -236,6 +239,8 @@ public:
 
   void swap();
   void retire();
+
+  void reset();
 
   std::size_t back() const;
   std::size_t front() const;

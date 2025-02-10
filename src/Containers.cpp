@@ -17,12 +17,32 @@ void
 Swapchain::swap()
 {
   swap(mBack);
+
+  mMiddleBufferSwaps.fetch_add(
+    1, std::memory_order_relaxed );
 }
 
 void
 Swapchain::retire()
 {
-  swap(mFront);
+  const auto currentSwaps =
+    mMiddleBufferSwaps.load(std::memory_order_relaxed);
+
+  if ( currentSwaps > mMiddleBufferSwapsPrev )
+    swap(mFront);
+
+  mMiddleBufferSwapsPrev = currentSwaps;
+}
+
+void
+Swapchain::reset()
+{
+  mFront = 2;
+  mMiddle = 1;
+  mBack = 0;
+
+  mMiddleBufferSwaps = 0;
+  mMiddleBufferSwapsPrev = 0;
 }
 
 std::size_t

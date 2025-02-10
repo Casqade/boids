@@ -1043,6 +1043,8 @@ main(
 
         recreateSwapchain(frontend);
 
+        boidSwapChain.reset();
+
         std::atomic_thread_fence(std::memory_order_release);
 
         renderThread = std::thread{renderingTask};
