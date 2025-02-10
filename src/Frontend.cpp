@@ -31,9 +31,14 @@ const std::vector <const char*> ValidationInstanceExtensions
   VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 };
 
-const std::vector <const char*> ValidationLayers
+const std::vector <const char*> ValidationInstanceLayers
 {
   "VK_LAYER_KHRONOS_validation",
+};
+
+const std::vector <const char*> RequiredDeviceExtensions
+{
+  VK_KHR_SWAPCHAIN_EXTENSION_NAME,
 };
 
 
@@ -122,9 +127,9 @@ initializeFrontend(
   std::vector <const char*> instanceExtensions {};
 
   {
-    instanceLayers.reserve(ValidationLayers.size());
+    instanceLayers.reserve(ValidationInstanceLayers.size());
 
-    for ( auto&& layer : ValidationLayers )
+    for ( const auto& layer : ValidationInstanceLayers )
       instanceLayers.push_back(layer);
   }
 
@@ -144,7 +149,7 @@ initializeFrontend(
       instanceExtensions.reserve(
         instanceExtensions.size() + ValidationInstanceExtensions.size() );
 
-      for ( auto&& extension : ValidationInstanceExtensions )
+      for ( const auto& extension : ValidationInstanceExtensions )
         instanceExtensions.push_back(extension);
     }
   }
@@ -272,8 +277,8 @@ initializeFrontend(
     .flags = {},
     .queueCreateInfoCount = queueCreateInfoCount,
     .pQueueCreateInfos = queueCreateInfos,
-    .enabledExtensionCount = 0,
-    .ppEnabledExtensionNames = nullptr,
+    .enabledExtensionCount = RequiredDeviceExtensions.size(),
+    .ppEnabledExtensionNames = RequiredDeviceExtensions.data(),
     .pEnabledFeatures = nullptr,
   };
 
