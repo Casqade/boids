@@ -94,6 +94,7 @@ enum PerfMarker : size_t
   Summing,
   RulesCalc,
   Transform,
+  Rendering,
   Total,
 
   PositionSumTask,
@@ -140,6 +141,24 @@ printElapsedTime(
     std::to_string(elapsedUs) + " us\n";
 }
 
+static int
+handleFrontendError(
+  Frontend& frontend,
+  const Result& result )
+{
+  if ( result.code != VK_ERROR_UNKNOWN )
+    LOG_ERROR("Vulkan error {}: {}", (int) result.code, result.message);
+  else
+    LOG_ERROR(result.message);
+
+  deinitializeFrontend(frontend);
+
+  destroyLogger();
+
+  return result.code;
+}
+
+
 int
 main(
   int argc,
@@ -159,8 +178,12 @@ main(
     .pfnInternalFree = cqdeVk::internalFree,
   };
 
+  RenderThreadData renderThreadData {};
+
   Frontend frontend
   {
+    .swapchain = {.maxConcurrentFrames = 3},
+    .renderThreadData = &renderThreadData,
     .allocator = &vkAllocatorCallbacks,
   };
 
@@ -179,18 +202,7 @@ main(
     VkExtent2D{800, 600} );
 
   if ( result.success() == false )
-  {
-    if ( result.code != VK_ERROR_UNKNOWN )
-      LOG_ERROR("Vulkan error {}: {}", (int) result.code, result.message);
-    else
-      LOG_ERROR("Vulkan initialization error: {}", result.message);
-
-    deinitializeFrontend(frontend);
-
-    destroyLogger();
-
-    return result.code;
-  }
+    return handleFrontendError(frontend, result);
 
 
   const std::size_t threadCount {5};
@@ -231,6 +243,25 @@ main(
 
   const auto expectedAllocationsCount =
     sizeof(std::size_t) * 19;
+
+
+  std::vector <VkBuffer> vertexBuffer(
+    frontend.swapchain.maxConcurrentFrames );
+
+  std::vector <VkDeviceMemory> vertexBufferMemory(
+    frontend.swapchain.maxConcurrentFrames );
+
+  for ( size_t i {}; i < vertexBuffer.size(); ++i )
+  {
+    result = createVertexBuffer(
+      frontend, sizeof(Vector3) * boidCount,
+      vertexBuffer[i],
+      vertexBufferMemory[i] );
+
+    if ( result.success() == false )
+      return handleFrontendError(frontend, result);
+  }
+
 
   AllocatorArena allocator {};
   allocator.reserve(
@@ -647,9 +678,345 @@ main(
     };
 
 
+    const auto renderingTask =
+    [&frontend, &vertexBuffer, &vertexBufferMemory, &boidSwapChain, &frameData] ()
+    {
+      std::atomic_thread_fence(std::memory_order_acquire);
+
+
+      VkResult result;
+
+
+      std::size_t currentFrameIndex {};
+
+      auto& renderThreadData = *frontend.renderThreadData;
+
+      while ( renderThreadData.shutdownRequested.load() == false )
+      {
+        PERF_TIME_BEGIN(PerfMarker::Rendering);
+
+
+        const auto cpuCmdExecutedFence =
+          frontend.cpuCmdExecutedSignals[currentFrameIndex];
+
+        const auto imageReadySignal =
+          frontend.swapchain.imageReadySignals[currentFrameIndex];
+
+        const auto gpuCmdExecutedSignal  =
+          frontend.gpuCmdExecutedSignals[currentFrameIndex];
+
+        const auto cmdBuffer =
+          frontend.commandBuffers[currentFrameIndex];
+
+        const auto framebuffer =
+          frontend.swapchain.framebuffers[currentFrameIndex];
+
+
+        result = vkWaitForFences(
+          frontend.device, 1,
+          &cpuCmdExecutedFence, VK_TRUE,
+          std::numeric_limits <std::uint64_t>::max() );
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to wait for cpuCmdExecuted fence", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        std::uint32_t acquiredImageIndex {};
+
+        result = vkAcquireNextImageKHR(
+          frontend.device,
+          frontend.swapchain.handle,
+          std::numeric_limits <std::uint64_t>::max(),
+          imageReadySignal,
+          VK_NULL_HANDLE,
+          &acquiredImageIndex );
+
+        if ( result == VK_ERROR_OUT_OF_DATE_KHR )
+        {
+          currentFrameIndex = 0;
+          renderThreadData.swapchainRecreationRequested.store(true);
+          return;
+        }
+
+        if ( result != VK_SUCCESS &&
+             result != VK_SUBOPTIMAL_KHR )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to acquire next image", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        result = vkResetFences(
+          frontend.device, 1,
+          &cpuCmdExecutedFence );
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to reset cpuCmdExecuted fence", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        result = vkResetCommandBuffer(
+          cmdBuffer, 0 );
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to reset command buffer", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        const auto bufferIndex = boidSwapChain.front();
+        auto& framePositions = frameData[bufferIndex].position;
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        writeVertexBuffer(
+          frontend, framePositions.data(),
+          0, sizeof(Vector3) * framePositions.length(),
+          vertexBufferMemory[acquiredImageIndex] );
+
+        boidSwapChain.retire();
+
+
+        const VkCommandBufferBeginInfo cmdBufferBeginInfo
+        {
+          .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+          .flags = 0,
+          .pInheritanceInfo = nullptr,
+        };
+
+        result = vkBeginCommandBuffer(
+          cmdBuffer, &cmdBufferBeginInfo );
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to begin command buffer", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        const VkClearValue clearColor
+        {
+          .color = {0.f, 0.f, 0.f, 1.f},
+        };
+
+        const VkRenderPassBeginInfo renderPassBeginInfo
+        {
+          .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+          .renderPass = frontend.renderPass,
+          .framebuffer = framebuffer,
+          .renderArea =
+          {
+            .offset = {},
+            .extent = frontend.swapchain.extent,
+          },
+          .clearValueCount = 1,
+          .pClearValues = &clearColor,
+        };
+
+        vkCmdBeginRenderPass(
+          cmdBuffer,
+          &renderPassBeginInfo,
+          VK_SUBPASS_CONTENTS_INLINE );
+
+        vkCmdBindPipeline(
+          cmdBuffer,
+          VK_PIPELINE_BIND_POINT_GRAPHICS,
+          frontend.graphicsPipeline );
+
+
+        const VkBuffer vertexBuffers[]
+        {
+          vertexBuffer[acquiredImageIndex],
+          vertexBuffer[acquiredImageIndex],
+        };
+
+        const VkDeviceSize offsets[]
+        {
+          0, 0,
+        };
+
+        vkCmdBindVertexBuffers(
+          cmdBuffer, 0, 2,
+          vertexBuffers, offsets );
+
+
+        const VkViewport viewport
+        {
+          .x = 0.f,
+          .y = 0.f,
+          .width = static_cast <float> (frontend.swapchain.extent.width),
+          .height = static_cast <float> (frontend.swapchain.extent.height),
+          .minDepth = 0.f,
+          .maxDepth = 1.f,
+        };
+
+        vkCmdSetViewport(
+          cmdBuffer, 0,
+          1, &viewport );
+
+
+        const VkRect2D scissor
+        {
+          .offset = {},
+          .extent = frontend.swapchain.extent,
+        };
+
+        vkCmdSetScissor(
+          cmdBuffer, 0,
+          1, &scissor );
+
+
+        vkCmdDraw(
+          cmdBuffer,
+          400000, 1,
+          0, 0 );
+
+
+        vkCmdEndRenderPass(cmdBuffer);
+
+
+        result = vkEndCommandBuffer(cmdBuffer);
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to end command buffer", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        const VkPipelineStageFlags waitStages[]
+        {
+          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        };
+
+        const VkSemaphore waitSemaphores[]
+        {
+          imageReadySignal,
+        };
+
+        const VkSemaphore signalSemaphores[]
+        {
+          gpuCmdExecutedSignal,
+        };
+
+        const VkSubmitInfo submitInfo
+        {
+          .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+          .waitSemaphoreCount = 1,
+          .pWaitSemaphores = waitSemaphores,
+          .pWaitDstStageMask = waitStages,
+          .commandBufferCount = 1,
+          .pCommandBuffers = &cmdBuffer,
+          .signalSemaphoreCount = 1,
+          .pSignalSemaphores = signalSemaphores,
+        };
+
+        result = vkQueueSubmit(
+          frontend.queues.graphics.handle,
+          1, &submitInfo,
+          cpuCmdExecutedFence );
+
+        if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to submit command buffer to a queue", result};
+
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+
+        const VkSwapchainKHR swapchains[]
+        {
+          frontend.swapchain.handle,
+        };
+
+        const VkPresentInfoKHR presentInfo
+        {
+          .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+          .waitSemaphoreCount = 1,
+          .pWaitSemaphores = signalSemaphores,
+          .swapchainCount = 1,
+          .pSwapchains = swapchains,
+          .pImageIndices = &acquiredImageIndex,
+          .pResults = nullptr,
+        };
+
+        result = vkQueuePresentKHR(
+          frontend.queues.presentation.handle,
+          &presentInfo );
+
+        if ( result == VK_ERROR_OUT_OF_DATE_KHR ||
+             result == VK_SUBOPTIMAL_KHR )
+        {
+          currentFrameIndex = 0;
+          renderThreadData.swapchainRecreationRequested.store(true);
+          return;
+        }
+
+        else if ( result != VK_SUCCESS )
+        {
+          renderThreadData.result =
+            {"[Vk] Failed to queue image for presentation", result};
+
+          std::atomic_thread_fence(std::memory_order_release);
+          renderThreadData.errorCaught.store(true);
+
+          return;
+        }
+
+        ++currentFrameIndex %= frontend.swapchain.maxConcurrentFrames;
+
+
+        PERF_TIME_END(PerfMarker::Rendering);
+
+        timeCounter[PerfMarker::Rendering].update(600);
+      }
+    };
+
+
     threadPool.parallel_for(posInitTask, boidCount, 1);
     threadPool.waitForTasks();
 
+
+    std::thread renderThread {renderingTask};
 
     std::cout << "start\n";
 
@@ -658,6 +1025,29 @@ main(
 
     for ( std::size_t frame {}; frame < frameCount; ++frame )
     {
+      if ( glfwWindowShouldClose(frontend.window) == true ||
+           renderThreadData.errorCaught.load() == true )
+        break;
+
+      glfwPollEvents();
+
+      if ( renderThreadData.swapchainRecreationRequested.load() == true )
+      {
+        renderThreadData.shutdownRequested.store(true);
+        renderThread.join();
+
+        renderThreadData.shutdownRequested.store(false);
+        renderThreadData.swapchainRecreationRequested.store(false);
+
+        vkDeviceWaitIdle(frontend.device);
+
+        recreateSwapchain(frontend);
+
+        std::atomic_thread_fence(std::memory_order_release);
+
+        renderThread = std::thread{renderingTask};
+      }
+
       deltaTime = std::fmod(dist(engine), targetFrameTime );
 
 
@@ -723,8 +1113,23 @@ main(
 
 
       for ( size_t i {}; i < PerfMarker::Count; ++i )
-        timeCounter[i].update(frameCount);
+        if ( i != PerfMarker::Rendering )
+          timeCounter[i].update(frameCount);
     }
+
+    renderThreadData.shutdownRequested.store(true);
+    renderThread.join();
+
+    if ( frontend.device != VK_NULL_HANDLE )
+      vkDeviceWaitIdle(frontend.device);
+
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    if ( renderThreadData.errorCaught.load() == true )
+      LOG_ERROR( "Render thread error {}: {}",
+        (int) renderThreadData.result.code,
+        renderThreadData.result.message );
+
 
     Vector3 pos {};
     Vector3 vel {};
@@ -749,6 +1154,7 @@ main(
     printElapsedTime(PerfMarker::Summing, "Summing");
     printElapsedTime(PerfMarker::RulesCalc, "RulesCalc");
     printElapsedTime(PerfMarker::Transform, "Transform");
+    printElapsedTime(PerfMarker::Rendering, "Rendering");
     printElapsedTime(PerfMarker::Total, "Total");
     std::cout << "\n";
 
@@ -771,6 +1177,13 @@ main(
 
 
   allocator.free();
+
+  for ( std::size_t i {}; i < frontend.swapchain.maxConcurrentFrames; ++i )
+  {
+    destroyVertexBuffer(
+      frontend, vertexBuffer[i],
+      vertexBufferMemory[i] );
+  }
 
   deinitializeFrontend(frontend);
 

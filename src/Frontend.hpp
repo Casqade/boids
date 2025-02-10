@@ -3,7 +3,9 @@
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 
+#include <cstdint>
 #include <string>
+#include <atomic>
 
 
 struct Result
@@ -17,6 +19,16 @@ struct Result
   Result( const char* message, VkResult = VK_SUCCESS );
 
   bool success() const;
+};
+
+
+struct RenderThreadData
+{
+  Result result {};
+
+  std::atomic_bool shutdownRequested {};
+  std::atomic_bool errorCaught {};
+  std::atomic_bool swapchainRecreationRequested {};
 };
 
 
@@ -36,6 +48,23 @@ struct Frontend
 
   struct
   {
+    std::vector <VkImage> images {};
+    std::vector <VkImageView> imageViews {};
+    std::vector <VkFramebuffer> framebuffers {};
+
+    std::vector <VkSemaphore> imageReadySignals {};
+
+    VkExtent2D extent {};
+    VkFormat imageFormat {};
+
+    size_t maxConcurrentFrames {};
+
+    VkSwapchainKHR handle {};
+
+  } swapchain {};
+
+  struct
+  {
     struct Queue
     {
       size_t familyIndex {};
@@ -46,6 +75,20 @@ struct Frontend
     Queue presentation {};
 
   } queues {};
+
+
+  VkRenderPass renderPass {};
+
+  VkPipelineLayout pipelineLayout {};
+  VkPipeline graphicsPipeline {};
+
+  VkCommandPool commandPool {};
+  std::vector <VkCommandBuffer> commandBuffers {};
+
+  std::vector <VkSemaphore> gpuCmdExecutedSignals {};
+  std::vector <VkFence> cpuCmdExecutedSignals {};
+
+  RenderThreadData* renderThreadData {};
 
   const VkAllocationCallbacks* allocator {};
 };
@@ -64,5 +107,55 @@ Result initializeWindow(
 Result findSuitablePhysicalDevice(
   Frontend& );
 
-Result deinitializeFrontend(
+Result createSwapchain(
+  Frontend& );
+
+Result recreateSwapchain(
+  Frontend& );
+
+Result destroySwapchain(
+  Frontend& );
+
+Result createRenderPass(
+  Frontend& );
+
+Result createGraphicsPipeline(
+  Frontend& );
+
+Result createFramebuffers(
+  Frontend& );
+
+Result createSyncObjects(
+  Frontend& );
+
+Result createShaderModule(
+  Frontend&,
+  VkShaderModule&,
+  const std::string& code );
+
+Result createCommandPool(
+  Frontend& );
+
+Result createCommandBuffers(
+  Frontend& );
+
+Result createVertexBuffer(
+  Frontend&,
+  const std::uint64_t bufferSize,
+  VkBuffer&,
+  VkDeviceMemory& );
+
+Result writeVertexBuffer(
+  Frontend&,
+  void* data,
+  const std::uint64_t offset,
+  const std::uint64_t size,
+  const VkDeviceMemory );
+
+void destroyVertexBuffer(
+  Frontend&,
+  VkBuffer&,
+  VkDeviceMemory& );
+
+void deinitializeFrontend(
   Frontend& );
