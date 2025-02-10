@@ -899,7 +899,7 @@ main(
 
         vkCmdDraw(
           cmdBuffer,
-          400000, 1,
+          boidCount, 1,
           0, 0 );
 
 
