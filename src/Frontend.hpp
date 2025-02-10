@@ -38,7 +38,7 @@ struct Frontend
   {
     struct Queue
     {
-      size_t index {};
+      size_t familyIndex {};
       VkQueue handle {};
     };
 

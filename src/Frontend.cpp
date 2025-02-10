@@ -256,7 +256,7 @@ initializeFrontend(
     {
       .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
       .flags = {},
-      .queueFamilyIndex = frontend.queues.graphics.index,
+      .queueFamilyIndex = frontend.queues.graphics.familyIndex,
       .queueCount = 1,
       .pQueuePriorities = &queuePriority,
     },
@@ -264,11 +264,11 @@ initializeFrontend(
 
   size_t queueCreateInfoCount {1};
 
-  if ( frontend.queues.graphics.index != frontend.queues.presentation.index )
+  if ( frontend.queues.graphics.familyIndex != frontend.queues.presentation.familyIndex )
   {
     ++queueCreateInfoCount;
     queueCreateInfos[1] = queueCreateInfos[0];
-    queueCreateInfos[1].queueFamilyIndex = frontend.queues.presentation.index;
+    queueCreateInfos[1].queueFamilyIndex = frontend.queues.presentation.familyIndex;
   }
 
   const VkDeviceCreateInfo deviceCreateInfo
@@ -294,12 +294,12 @@ initializeFrontend(
 
   vkGetDeviceQueue(
     frontend.device,
-    frontend.queues.graphics.index, 1,
+    frontend.queues.graphics.familyIndex, 0,
     &frontend.queues.graphics.handle );
 
   vkGetDeviceQueue(
     frontend.device,
-    frontend.queues.presentation.index, 1,
+    frontend.queues.presentation.familyIndex, 0,
     &frontend.queues.presentation.handle );
 
   return {};
@@ -385,13 +385,13 @@ findSuitablePhysicalDevice(
       if ( graphicsSupported == true )
       {
         foundGraphicsQueue = true;
-        frontend.queues.graphics.index = i;
+        frontend.queues.graphics.familyIndex = i;
       }
 
       if ( presentationSupported == true )
       {
         foundPresentationQueue = true;
-        frontend.queues.presentation.index = i;
+        frontend.queues.presentation.familyIndex = i;
       }
 
       if ( foundGraphicsQueue == true &&
