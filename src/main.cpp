@@ -1050,7 +1050,8 @@ main(
         renderThread = std::thread{renderingTask};
       }
 
-      deltaTime = std::fmod(dist(engine), targetFrameTime );
+//      deltaTime = std::fmod(dist(engine), targetFrameTime);
+      deltaTime = targetFrameTime;
 
 
       PERF_TIME_BEGIN(PerfMarker::Total);
