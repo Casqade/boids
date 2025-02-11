@@ -22,9 +22,9 @@ createLogger(
     {
       struct
       {
-        log_level cmd {log_level::trace};
+        log_level cmd {log_level::info};
         log_level file {log_level::trace};
-        log_level flushOn {log_level::trace};
+        log_level flushOn {log_level::info};
 
       } level {};
 
