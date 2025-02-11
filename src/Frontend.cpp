@@ -615,7 +615,7 @@ createSwapchain(
     return {"[Vk] Failed to create swapchain - ", VK_ERROR_UNKNOWN};
 
 
-  auto surfaceFormat = surfaceFormats.front();;
+  auto surfaceFormat = surfaceFormats.front();
 
   for ( const auto& supportedFormat : surfaceFormats )
   {
@@ -667,12 +667,24 @@ createSwapchain(
 
 
   const auto requestedImageCount = std::clamp(
-    surfaceCapabilities.minImageCount + 1,
+    frontend.swapchain.maxConcurrentFrames,
     surfaceCapabilities.minImageCount,
     surfaceCapabilities.maxImageCount > 0
       ? surfaceCapabilities.maxImageCount
-      : surfaceCapabilities.minImageCount + 1 );
+      : frontend.swapchain.maxConcurrentFrames );
 
+
+  if ( requestedImageCount != frontend.swapchain.maxConcurrentFrames )
+  {
+    const auto errorMessage = fmt::format(
+      "[Vk] Selected swapchain doesn't support requested image count ({}). "
+      "Supported min/max image count: {}/{}",
+      requestedImageCount,
+      surfaceCapabilities.minImageCount,
+      surfaceCapabilities.maxImageCount );
+
+    return {errorMessage, VK_ERROR_UNKNOWN};
+  }
 
   VkSwapchainCreateInfoKHR swapchainCreateInfo
   {
@@ -725,6 +737,17 @@ createSwapchain(
 
   if ( result != VK_SUCCESS )
     return {"[Vk] Failed to get swapchain images", result};
+
+
+  if ( actualImageCount != frontend.swapchain.maxConcurrentFrames )
+  {
+    const auto errorMessage = fmt::format(
+      "[Vk] Actual image count acquired from swapchain ({}) differs from requested image count ({})",
+      actualImageCount, requestedImageCount );
+
+    return {errorMessage, VK_ERROR_UNKNOWN};
+  }
+
 
   frontend.swapchain.images.resize(actualImageCount);
   frontend.swapchain.imageViews.resize(actualImageCount);
