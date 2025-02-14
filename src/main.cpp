@@ -21,9 +21,9 @@ struct BoidRuleset
 {
   struct
   {
-    float alignment {0.1f};
-    float coherence {0.1f};
-    float separation {0.1f};
+    float alignment {0.0f}; // 0.02f | 0.0f
+    float coherence {0.0f}; // 0.01f | 0.0f
+    float separation {0.9f}; // 0.7f | 0.9f
 
   } weights {};
 
