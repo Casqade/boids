@@ -1058,9 +1058,9 @@ main(
       PERF_TIME_BEGIN_COPY(PerfMarker::ResetTask, PerfMarker::Total);
 
 
-      threadPool.parallel_for(resetAveragePositionTask, boidCount, 1);
-      threadPool.parallel_for(resetAverageVelocityTask, boidCount, 1);
-      threadPool.parallel_for(resetBoidCountTask, boidCount, 1);
+      threadPool.parallel_for(resetAveragePositionTask, maxOccupiedCellCount, 1);
+      threadPool.parallel_for(resetAverageVelocityTask, maxOccupiedCellCount, 1);
+      threadPool.parallel_for(resetBoidCountTask, maxOccupiedCellCount, 1);
 //      threadPool.parallel_for(resetCellsTask, cellCount, 1);
       resetCellsTask(0, cellCount);
 
