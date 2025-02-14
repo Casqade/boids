@@ -25,7 +25,6 @@ struct BoidRuleset
 
   } weights {};
 
-  float obstacleAvoidanceDistance {0.15f};
   float maxSpeed {0.1f};
 };
 
@@ -70,13 +69,13 @@ hashPos(
 
 Vector3::value_type
 getAvoidance(
-  const Vector3::value_type coordinate,
+  const Vector3::value_type predictedCoordinate,
   const Vector3::value_type margin )
 {
-  if ( coordinate > 1 - margin )
+  if ( predictedCoordinate >= 1.f - margin )
     return -1;
 
-  if ( coordinate < margin )
+  if ( predictedCoordinate <= 0.f + margin )
     return 1;
 
   return {};
@@ -329,7 +328,7 @@ main(
     BoidRuleset rules {};
 
     std::random_device rd {};
-    std::uniform_real_distribution dist(0.f, 1.f);
+    std::uniform_real_distribution dist(rules.maxSpeed, 1.f - rules.maxSpeed);
     std::minstd_rand0 engine
     {
 //      rd()
@@ -341,7 +340,7 @@ main(
       for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         boids.position[i] = { dist(engine), dist(engine), dist(engine) };
-//        boids.velocity[i] = { dist(engine), dist(engine), dist(engine) };
+        boids.velocity[i] = { dist(engine) - 0.5f, dist(engine) - 0.5f, dist(engine) - 0.5f };
       }
     };
 
@@ -487,12 +486,16 @@ main(
       for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         const auto& position = boids.position[i];
+        const auto& velocity = boids.velocity[i];
+
+        const auto predictedPosition = position + velocity;
+        const auto margin = rules.maxSpeed;
 
         boids.obstacleAvoidance[i] =
         {
-          getAvoidance(position.x, rules.obstacleAvoidanceDistance),
-          getAvoidance(position.y, rules.obstacleAvoidanceDistance),
-          getAvoidance(position.z, rules.obstacleAvoidanceDistance)
+          getAvoidance(predictedPosition.x, margin),
+          getAvoidance(predictedPosition.y, margin),
+          getAvoidance(predictedPosition.z, margin),
         };
       }
 
@@ -634,13 +637,14 @@ main(
 
         const auto desiredVelocity =
           obstacleAvoidance.length_squared() > 0.f
-            ? obstacleAvoidance.normalized()
+            ? obstacleAvoidance
             : heading.normalized();
 
         const auto prevVelocity = velocity;
 
         velocity =
-          (velocity + (desiredVelocity - velocity) * deltaTime).normalized();
+//          (velocity + (desiredVelocity - velocity) * deltaTime).normalized();
+          (velocity - desiredVelocity) * std::pow(1.f - rules.maxSpeed, deltaTime) + desiredVelocity;
 
         assert(velocity.x >= -1.f);
         assert(velocity.y >= -1.f);
@@ -656,7 +660,8 @@ main(
         assert(prevVelocity.y <= 1.f);
         assert(prevVelocity.z <= 1.f);
 
-        position += velocity * rules.maxSpeed * deltaTime;
+//        position += velocity * rules.maxSpeed * deltaTime;
+        position += 0.5f * (prevVelocity + velocity) * rules.maxSpeed * deltaTime;
 
         assert(position.x >= 0.f);
         assert(position.y >= 0.f);
@@ -664,13 +669,13 @@ main(
         assert(position.x <= 1.f);
         assert(position.y <= 1.f);
         assert(position.z <= 1.f);
-        continue;
+continue;
 
-        boids.position[i] =
+        position =
         {
-          std::fmod(boids.position[i].x + velocity.x * deltaTime, 1.f),
-          std::fmod(boids.position[i].y + velocity.y * deltaTime, 1.f),
-          std::fmod(boids.position[i].z + velocity.z * deltaTime, 1.f),
+          std::fmod(position.x + velocity.x * deltaTime, 1.f),
+          std::fmod(position.y + velocity.y * deltaTime, 1.f),
+          std::fmod(position.z + velocity.z * deltaTime, 1.f),
         };
       }
 
