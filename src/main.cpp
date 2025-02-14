@@ -7,6 +7,8 @@
 #include "ThreadAffinity.hpp"
 #include "PerformanceCounter.hpp"
 
+#include <TimeUtils/Duration.hpp>
+
 #include <cassert>
 #include <chrono>
 
@@ -163,6 +165,8 @@ main(
   int argc,
   char* argv[] )
 {
+  TimeUtils::TimePeriodInit();
+
   createLogger("Boids");
 
   cqdeVk::Allocator vkAllocator {};
@@ -1028,6 +1032,8 @@ continue;
     const std::size_t frameCount {600};
     const float targetFrameTime {1.f / 120.f};
 
+    TimeUtils::Duration previousTime = TimeUtils::Now();
+
     for ( std::size_t frame {}; frame < frameCount; ++frame )
     {
       if ( glfwWindowShouldClose(frontend.window) == true ||
@@ -1055,8 +1061,13 @@ continue;
         renderThread = std::thread{renderingTask};
       }
 
+
+      const auto currentTime = TimeUtils::Now();
+      deltaTime = static_cast <float> (currentTime - previousTime);
+      previousTime = currentTime;
+
 //      deltaTime = std::fmod(dist(engine), targetFrameTime);
-      deltaTime = targetFrameTime;
+//      deltaTime = targetFrameTime;
 
 
       PERF_TIME_BEGIN(PerfMarker::Total);
@@ -1196,6 +1207,8 @@ continue;
   deinitializeFrontend(frontend);
 
   destroyLogger();
+
+  TimeUtils::TimePeriodDeinit();
 
   return 0;
 }
