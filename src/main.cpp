@@ -626,6 +626,9 @@ main(
     {
 //      PERF_TIME_BEGIN(PerfMarker::TransformBoidsTask);
 
+      const auto lerpApproximationCoeff =
+        std::pow(1.f - rules.maxSpeed, deltaTime);
+
       for ( std::size_t i = rangeStart; i < rangeEnd; ++i )
       {
         auto& velocity = boids.velocity[i];
@@ -648,7 +651,7 @@ main(
 
         velocity =
 //          (velocity + (desiredVelocity - velocity) * deltaTime).normalized();
-          (velocity - desiredVelocity) * std::pow(1.f - rules.maxSpeed, deltaTime) + desiredVelocity;
+          (velocity - desiredVelocity) * lerpApproximationCoeff + desiredVelocity;
 
         assert(velocity.x >= -1.f);
         assert(velocity.y >= -1.f);
