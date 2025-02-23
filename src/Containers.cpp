@@ -18,31 +18,27 @@ Swapchain::swap()
 {
   swap(mBack);
 
-  mMiddleBufferSwaps.fetch_add(
-    1, std::memory_order_relaxed );
+  mMiddleBufferWasRead.clear(std::memory_order_relaxed);
 }
 
 void
 Swapchain::retire()
 {
-  const auto currentSwaps =
-    mMiddleBufferSwaps.load(std::memory_order_relaxed);
+  const auto wasRead = mMiddleBufferWasRead.test_and_set(
+    std::memory_order_relaxed );
 
-  if ( currentSwaps > mMiddleBufferSwapsPrev )
+  if ( wasRead == false )
     swap(mFront);
-
-  mMiddleBufferSwapsPrev = currentSwaps;
 }
 
 void
 Swapchain::reset()
 {
   mFront = 2;
-  mMiddle = 1;
+  mMiddle.store(1, std::memory_order_relaxed);
   mBack = 0;
 
-  mMiddleBufferSwaps = 0;
-  mMiddleBufferSwapsPrev = 0;
+  mMiddleBufferWasRead.clear(std::memory_order_relaxed);
 }
 
 std::size_t
